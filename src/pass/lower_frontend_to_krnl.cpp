@@ -820,6 +820,155 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
   }
 };
 
+struct ONNXSoftmaxOpLowering : public ConversionPattern {
+  ONNXSoftmaxOpLowering(MLIRContext *ctx)
+      : ConversionPattern(mlir::ONNXSoftmaxOp::getOperationName(), 1, ctx) {}
+  PatternMatchResult
+  matchAndRewrite(Operation *op, ArrayRef<Value *> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+    auto loc = op->getLoc();
+    auto axis = op->getAttrOfType<IntegerAttr>("Softmax.axis")
+                    .getValue()
+                    .getZExtValue();
+
+    // Insert an allocation and deallocation for the result of this operation.
+    auto memRefType = convertTensorToMemRef(tensorType);
+
+    Value *alloc;
+    bool insertDealloc = checkInsertDealloc(op);
+    if (hasAllConstantDimensions(memRefType))
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
+    else
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
+                                    operands[0]);
+
+    // Number of loops
+    auto memRefShape = memRefType.getShape();
+    int64_t rank = memRefShape.size();
+
+    // Define loops.
+    auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
+    std::vector<Value *> originalLoops;
+    originalLoops.reserve(rank);
+    for (auto result : loopsOp.getResults()) {
+      originalLoops.push_back(result);
+    }
+
+    // Define loop optimization.
+    auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
+    std::vector<Value *> optimizedLoops;
+    optimizedLoops.reserve(rank);
+    for (auto result : optimizedLoopsOp.getResults()) {
+      optimizedLoops.push_back(result);
+    }
+    Block &optimizationBlock = optimizedLoopsOp.region().front();
+
+    // Define an outer loop with respect to axis
+    std::vector<Value *> outerLoops, optimizedOuterLoops;
+    outerLoops.reserve(axis);
+    optimizedOuterLoops.reserve(axis);
+    for (int i = 0; i < axis; ++i) {
+      outerLoops.push_back(originalLoops[i]);
+      optimizedOuterLoops.push_back(optimizedLoops[i]);
+    }
+    KrnlIterateOperandPack outerPack(rewriter, outerLoops, optimizedOuterLoops);
+    for (int i = 0; i < axis; ++i) {
+      if (memRefShape[i] < 0) {
+        outerPack.pushConstantBound(0);
+        outerPack.pushOperandBound(
+            rewriter.create<DimOp>(loc, operands[0], i).getResult());
+      } else {
+        outerPack.pushConstantBound(0);
+        outerPack.pushConstantBound(memRefShape[i]);
+      }
+    }
+    // Define an inner loop with respect to axis
+    std::vector<Value *> innerLoops, optimizedInnerLoops;
+    innerLoops.reserve(rank - axis);
+    optimizedInnerLoops.reserve(rank - axis);
+    for (int i = axis; i < rank; ++i) {
+      innerLoops.push_back(originalLoops[i]);
+      optimizedInnerLoops.push_back(optimizedLoops[i]);
+    }
+    KrnlIterateOperandPack innerPack(rewriter, innerLoops, optimizedInnerLoops);
+    for (int i = axis; i < rank; ++i) {
+      if (memRefShape[i] < 0) {
+        innerPack.pushConstantBound(0);
+        innerPack.pushOperandBound(
+            rewriter.create<DimOp>(loc, operands[0], i).getResult());
+      } else {
+        innerPack.pushConstantBound(0);
+        innerPack.pushConstantBound(memRefShape[i]);
+      }
+    }
+
+    // Create the outer loop
+    auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
+    Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
+
+    // No optimization
+    rewriter.setInsertionPointToEnd(&optimizationBlock);
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+    rewriter.setInsertionPoint(optimizedLoopsOp);
+
+    // Insert instructions inside the outer loop
+    rewriter.setInsertionPointToStart(&outerIterationBlock);
+
+    // Create a sum value
+    auto sumOp = rewriter.create<AllocOp>(
+        loc, MemRefType::get({}, memRefType.getElementType(), {}, 0));
+
+    // Create an inner loop to compute sum
+    auto sumIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
+    Block &sumIterationBlock = sumIterateOp.bodyRegion().front();
+    // Create an inner loop to compute softmax
+    auto softmaxIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
+    Block &softmaxIterationBlock = softmaxIterateOp.bodyRegion().front();
+
+    // Insert instructions inside the sum loop
+    rewriter.setInsertionPointToStart(&sumIterationBlock);
+
+    // Get induction variables
+    SmallVector<Value *, 4> sumLoopIVs;
+    for (auto arg : outerIterationBlock.getArguments())
+      sumLoopIVs.push_back(arg);
+    for (auto arg : sumIterationBlock.getArguments())
+      sumLoopIVs.push_back(arg);
+
+    // Sum up values
+    Value *sum = rewriter.create<LoadOp>(loc, sumOp);
+    Value *next = rewriter.create<LoadOp>(loc, operands[0], sumLoopIVs);
+    Value *expNext = rewriter.create<ExpOp>(loc, next);
+    sum = rewriter.create<AddFOp>(loc, sum, expNext);
+    rewriter.create<StoreOp>(loc, sum, sumOp);
+
+    // Insert instructions inside the softmax loop
+    rewriter.setInsertionPoint(softmaxIterateOp);
+
+    sum = rewriter.create<LoadOp>(loc, sumOp);
+
+    rewriter.setInsertionPointToStart(&softmaxIterationBlock);
+    // Get induction variables
+    SmallVector<Value *, 4> softmaxLoopIVs;
+    for (auto arg : outerIterationBlock.getArguments())
+      softmaxLoopIVs.push_back(arg);
+    for (auto arg : softmaxIterationBlock.getArguments())
+      softmaxLoopIVs.push_back(arg);
+
+    // Compute softmax
+    Value *loadedVal =
+        rewriter.create<LoadOp>(loc, operands[0], softmaxLoopIVs);
+    Value *expLoadedVal = rewriter.create<ExpOp>(loc, loadedVal);
+    Value *result = rewriter.create<DivFOp>(loc, expLoadedVal, sum);
+    rewriter.create<StoreOp>(loc, result, alloc, softmaxLoopIVs);
+
+    rewriter.replaceOp(op, alloc);
+
+    return matchSuccess();
+  }
+};
+
 struct ONNXReshapeOpLowering : public ConversionPattern {
   ONNXReshapeOpLowering(MLIRContext *ctx)
       : ConversionPattern(mlir::ONNXReshapeOp::getOperationName(), 1, ctx) {}
