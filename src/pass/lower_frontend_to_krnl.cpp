@@ -864,7 +864,6 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
         loc,
         FloatAttr::get(elementType, -std::numeric_limits<float>::infinity()));
 
-
     // Define loops.
     auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
     std::vector<Value *> originalLoops;
