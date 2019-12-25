@@ -832,8 +832,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     //                    exp_x / sum
     auto tensorType = (*op->result_type_begin()).cast<RankedTensorType>();
     int64_t rank = tensorType.getRank();
-    int64_t axis = op->getAttrOfType<IntegerAttr>("Softmax.axis")
-                    .getInt();
+    int64_t axis = op->getAttrOfType<IntegerAttr>("Softmax.axis").getInt();
     axis = axis >= 0 ? axis : rank + axis;
     assert(axis >= -rank && axis <= rank - 1);
 
@@ -984,7 +983,8 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     // Compute the max value.
     Value *max = rewriter.create<LoadOp>(loc, maxOp);
     Value *nextMax = rewriter.create<LoadOp>(loc, operands[0], maxLoopIVs);
-    auto maxCond = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, max, nextMax);
+    auto maxCond =
+        rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, max, nextMax);
     max = rewriter.create<SelectOp>(loc, maxCond, max, nextMax);
     rewriter.create<StoreOp>(loc, max, maxOp);
 
@@ -1029,8 +1029,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
       softmaxLoopIVs.push_back(arg);
 
     // Compute softmax.
-    Value *expLoadedVal =
-        rewriter.create<LoadOp>(loc, alloc, softmaxLoopIVs);
+    Value *expLoadedVal = rewriter.create<LoadOp>(loc, alloc, softmaxLoopIVs);
     Value *result = rewriter.create<DivFOp>(loc, expLoadedVal, sum);
     rewriter.create<StoreOp>(loc, result, alloc, softmaxLoopIVs);
 
