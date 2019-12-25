@@ -826,6 +826,10 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value *> operands,
                   ConversionPatternRewriter &rewriter) const final {
+    // softmax(x) = let max_x = max(x) in
+    //                let exp_x = exp(x - max_x) in
+    //                  let sum = sum(exp_x) in
+    //                    exp_x / sum
     auto tensorType = (*op->result_type_begin()).cast<TensorType>();
     auto loc = op->getLoc();
     auto axis = op->getAttrOfType<IntegerAttr>("Softmax.axis")
@@ -834,6 +838,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
 
     // Insert an allocation and deallocation for the result of this operation.
     auto memRefType = convertTensorToMemRef(tensorType);
+    auto elementType = memRefType.getElementType();
 
     Value *alloc;
     bool insertDealloc = checkInsertDealloc(op);
@@ -842,6 +847,16 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     else
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
                                     operands[0]);
+
+    // Insert an allocation and deallocation for sum and max.
+    MemRefType scalarMemRefType = MemRefType::get({}, elementType, {}, 0);
+    Value *sumOp = insertAllocAndDealloc(scalarMemRefType, loc, rewriter, true);
+    Value *maxOp = insertAllocAndDealloc(scalarMemRefType, loc, rewriter, true);
+    Value *zero =
+        rewriter.create<ConstantOp>(loc, FloatAttr::get(elementType, 0));
+    Value *negInfinity = rewriter.create<ConstantOp>(
+        loc,
+        FloatAttr::get(elementType, -std::numeric_limits<float>::infinity()));
 
     // Number of loops
     auto memRefShape = memRefType.getShape();
@@ -864,7 +879,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     }
     Block &optimizationBlock = optimizedLoopsOp.region().front();
 
-    // Define an outer loop with respect to axis
+    // Define an outer loop with respect to axis.
     std::vector<Value *> outerLoops, optimizedOuterLoops;
     outerLoops.reserve(axis);
     optimizedOuterLoops.reserve(axis);
@@ -883,7 +898,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
         outerPack.pushConstantBound(memRefShape[i]);
       }
     }
-    // Define an inner loop with respect to axis
+    // Define an inner loop with respect to axis.
     std::vector<Value *> innerLoops, optimizedInnerLoops;
     innerLoops.reserve(rank - axis);
     optimizedInnerLoops.reserve(rank - axis);
@@ -903,63 +918,93 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
       }
     }
 
-    // Create the outer loop
-    auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
-    Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
+    // Create the outer loop.
+    KrnlIterateOp outerIterateOp;
+    SmallVector<Value *, 4> outerLoopIVs;
+    outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
 
     // No optimization
     rewriter.setInsertionPointToEnd(&optimizationBlock);
     rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
     rewriter.setInsertionPoint(optimizedLoopsOp);
 
-    // Insert instructions inside the outer loop
+    // Insert instructions inside the outer loop.
+    Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
     rewriter.setInsertionPointToStart(&outerIterationBlock);
+    for (auto arg : outerIterationBlock.getArguments())
+      outerLoopIVs.push_back(arg);
 
-    // Create a sum value
-    auto sumOp = rewriter.create<AllocOp>(
-        loc, MemRefType::get({}, memRefType.getElementType(), {}, 0));
+    // Reset accumulators.
+    rewriter.create<StoreOp>(loc, zero, sumOp);
+    rewriter.create<StoreOp>(loc, negInfinity, maxOp);
 
-    // Create an inner loop to compute sum
+    // Create an inner loop to compute max.
+    auto maxIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
+    Block &maxIterationBlock = maxIterateOp.bodyRegion().front();
+    // Create an inner loop to compute sum.
     auto sumIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
     Block &sumIterationBlock = sumIterateOp.bodyRegion().front();
-    // Create an inner loop to compute softmax
+    // Create an inner loop to compute softmax.
     auto softmaxIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
     Block &softmaxIterationBlock = softmaxIterateOp.bodyRegion().front();
 
-    // Insert instructions inside the sum loop
+    // Insert instructions inside the max loop.
+    rewriter.setInsertionPointToStart(&maxIterationBlock);
+
+    // Get induction variables.
+    SmallVector<Value *, 4> maxLoopIVs;
+    for (auto arg : outerLoopIVs)
+      maxLoopIVs.push_back(arg);
+    for (auto arg : maxIterationBlock.getArguments())
+      maxLoopIVs.push_back(arg);
+
+    // Compute the max value.
+    Value *max = rewriter.create<LoadOp>(loc, maxOp);
+    Value *nextMax = rewriter.create<LoadOp>(loc, operands[0], maxLoopIVs);
+    auto maxCond = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, max, nextMax);
+    max = rewriter.create<SelectOp>(loc, maxCond, max, nextMax);
+    rewriter.create<StoreOp>(loc, max, maxOp);
+
+    // Get the max.
+    rewriter.setInsertionPoint(sumIterateOp);
+    max = rewriter.create<LoadOp>(loc, maxOp);
+
+    // Insert instructions inside the sum loop.
     rewriter.setInsertionPointToStart(&sumIterationBlock);
 
-    // Get induction variables
+    // Get induction variables.
     SmallVector<Value *, 4> sumLoopIVs;
-    for (auto arg : outerIterationBlock.getArguments())
+    for (auto arg : outerLoopIVs)
       sumLoopIVs.push_back(arg);
     for (auto arg : sumIterationBlock.getArguments())
       sumLoopIVs.push_back(arg);
 
-    // Sum up values
+    // Sum up values.
     Value *sum = rewriter.create<LoadOp>(loc, sumOp);
     Value *next = rewriter.create<LoadOp>(loc, operands[0], sumLoopIVs);
-    Value *expNext = rewriter.create<ExpOp>(loc, next);
-    sum = rewriter.create<AddFOp>(loc, sum, expNext);
+    Value *sub = rewriter.create<SubFOp>(loc, next, max);
+    Value *exp = rewriter.create<ExpOp>(loc, sub);
+    sum = rewriter.create<AddFOp>(loc, sum, exp);
     rewriter.create<StoreOp>(loc, sum, sumOp);
+    // Store intermediate values in the result to avoid recomputation.
+    rewriter.create<StoreOp>(loc, exp, alloc, sumLoopIVs);
 
-    // Insert instructions inside the softmax loop
+    // Get the sum.
     rewriter.setInsertionPoint(softmaxIterateOp);
-
     sum = rewriter.create<LoadOp>(loc, sumOp);
 
+    // Insert instructions inside the softmax loop.
     rewriter.setInsertionPointToStart(&softmaxIterationBlock);
-    // Get induction variables
+    // Get induction variables.
     SmallVector<Value *, 4> softmaxLoopIVs;
-    for (auto arg : outerIterationBlock.getArguments())
+    for (auto arg : outerLoopIVs)
       softmaxLoopIVs.push_back(arg);
     for (auto arg : softmaxIterationBlock.getArguments())
       softmaxLoopIVs.push_back(arg);
 
-    // Compute softmax
-    Value *loadedVal =
-        rewriter.create<LoadOp>(loc, operands[0], softmaxLoopIVs);
-    Value *expLoadedVal = rewriter.create<ExpOp>(loc, loadedVal);
+    // Compute softmax.
+    Value *expLoadedVal =
+        rewriter.create<LoadOp>(loc, alloc, softmaxLoopIVs);
     Value *result = rewriter.create<DivFOp>(loc, expLoadedVal, sum);
     rewriter.create<StoreOp>(loc, result, alloc, softmaxLoopIVs);
 
