@@ -514,7 +514,8 @@ private:
   void ImportNodeOneOut(
       onnx::NodeProto node, int nIn, int nOut,
       std::initializer_list<std::tuple<std::string, std::string, std::string>>
-          attrs) {
+          attrs,
+      bool variadicIn = false, bool variadicOut = false) {
     std::vector<mlir::Value> inputs;
     for (auto item : node.input()) {
       if (frontend_symbols_.ContainKey(legalize_name(item))) {
@@ -546,8 +547,8 @@ private:
     }
 
     llvm::StringRef OpName = node.op_type();
-
-    if (nIn == inputs.size() && nOut == outputTypes.size()) {
+    if ((variadicIn || nIn == inputs.size()) &&
+        (variadicOut || nOut == outputTypes.size())) {
       auto op =
           builder_.create<T>(UnknownLoc(), outputTypes, inputs, attributes);
       frontend_symbols_.AddMapping(legalize_name(node.output()[0]),

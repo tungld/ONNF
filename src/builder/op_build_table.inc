@@ -301,7 +301,7 @@
       });
     }else if (OpName == "Max") {
        ImportNodeOneOut<mlir::ONNXMaxOp>(node, 1, 1, {
-      });
+      }, true);
     }else if (OpName == "MaxPool") {
        ImportNodeMultipleOuts<mlir::ONNXMaxPoolOp>(node, 1, 2, {
          {"auto_pad","str","NOTSET"}
@@ -332,7 +332,7 @@
       });
     }else if (OpName == "Min") {
        ImportNodeOneOut<mlir::ONNXMinOp>(node, 1, 1, {
-      });
+      }, true);
     }else if (OpName == "Mod") {
        ImportNodeOneOut<mlir::ONNXModOp>(node, 2, 1, {
          {"fmod","int","0"}
@@ -630,7 +630,7 @@
       });
     }else if (OpName == "Sum") {
        ImportNodeOneOut<mlir::ONNXSumOp>(node, 1, 1, {
-      });
+      }, true);
     }else if (OpName == "Tan") {
        ImportNodeOneOut<mlir::ONNXTanOp>(node, 1, 1, {
       });
