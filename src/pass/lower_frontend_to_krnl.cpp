@@ -914,9 +914,19 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     bool insertDealloc = checkInsertDealloc(op);
     if (hasAllConstantDimensions(memRefType))
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
-    else  // TODO: do not pass operands, it is wrong.
-      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
-                                    operands);
+    else {
+      auto memRefShape = memRefType.getShape();
+      SmallVector<Value, 2> allocOperands;
+      if (memRefShape[0] < 0) {
+        auto dim = rewriter.create<DimOp>(loc, A, (isTransA) ? 1 : 0);
+        allocOperands.push_back(dim);
+      }
+      if (memRefShape[1] < 0) {
+        auto dim = rewriter.create<DimOp>(loc, B, (isTransB) ? 0 : 1);
+        allocOperands.push_back(dim);
+      }
+      alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
+    }
 
     // Number of loops
     auto memRefShape = memRefType.getShape();
@@ -953,7 +963,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     }
     // Induction variable for the reduction dimension
     auto ATy = A->getType().cast<MemRefType>();
-    int64_t reductionDimIdx = (isTransA) ? 1 : 0;
+    int64_t reductionDimIdx = (isTransA) ? 0 : 1;
     if (ATy.getShape()[reductionDimIdx] < 0) {
       pack.pushConstantBound(0);
       pack.pushOperandBound(
@@ -966,9 +976,18 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
     // GemmOp supports unidirectional broadcasting from C to A*B.
-    // Hence, it must be enought to get broadcasting information for C only.
-    std::map<int, Value> broadcastedDimInfo =
-        getBroadcastedDimInfo(loc, rewriter, memRefType, {C})[0];
+    // Hence, it must be enough to get broadcasting information for C only.
+    std::map<int, Value> broadcastedDimInfo;
+    auto shape = C->getType().cast<MemRefType>().getShape();
+    for (int i = 0; i < shape.size(); ++i) {
+      if (shape[i] < 0) {
+        auto dim = rewriter.create<DimOp>(loc, C, i).getResult();
+        auto one = rewriter.create<ConstantIndexOp>(loc, 1);
+        auto isBroadcasted =
+          rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
+        broadcastedDimInfo.insert(std::make_pair(i, isBroadcasted));
+      }
+    }
 
     auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
     Block &iterationBlock = iterateOp.bodyRegion().front();
