@@ -533,3 +533,8 @@ func @test_add_with_broadcasting(%arg0 : tensor<?xf32>, %arg1 : tensor<?x10xf32>
   // CHECK: }
   // CHECK: return [[RES]] : memref<?x10xf32>
 }
+
+func @test_gemm(%arg0 : tensor<10x5xf32>, %arg1 : tensor<5x10xf32>, %arg2: tensor<10x10xf32>) -> tensor<*xf32> {
+  %0 ="onnx.Gemm"(%arg0, %arg1, %arg2) {Gemm.alpha = 1.0 : f32, Gemm.beta = 1.0 : f32, Gemm.transA = 0, Gemm.transB = 0} : (tensor<10x5xf32>, tensor<5x10xf32>, tensor<10x10xf32>) -> tensor<*xf32> 
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+}

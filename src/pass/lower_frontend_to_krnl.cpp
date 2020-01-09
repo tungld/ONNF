@@ -881,6 +881,141 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   }
 };
 
+struct ONNXGemmOpLowering : public ConversionPattern {
+  ONNXGemmOpLowering(MLIRContext *ctx)
+      : ConversionPattern(mlir::ONNXGemmOp::getOperationName(), 1, ctx) {}
+
+  PatternMatchResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+    auto loc = op->getLoc();
+
+    Value A, B, C;
+    A = operands[0];
+    B = operands[1];
+    C = operands[2];
+
+    auto alphaAttr = op->getAttrOfType<FloatAttr>("Gemm.alpha");
+    auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
+    auto betaAttr = op->getAttrOfType<FloatAttr>("Gemm.beta");
+    auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
+
+    // Get the reduction dim index using the first matrix.
+    auto ATy = A->getType().cast<MemRefType>();
+    int64_t transA = op->getAttrOfType<IntegerAttr>("Gemm.transA").getInt();
+    int64_t reductionDimIdx = (transA == 0) ? 0 : 1;
+
+    // Result type
+    auto memRefType = convertTensorToMemRef(tensorType);
+
+    // Insert an allocation and deallocation for the result of this operation.
+    Value alloc;
+    bool insertDealloc = checkInsertDealloc(op);
+    if (hasAllConstantDimensions(memRefType))
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
+    else  // TODO: do not pass operands, it is wrong.
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
+                                    operands);
+
+    // Number of loops
+    auto memRefShape = memRefType.getShape();
+    int64_t numLoops = 3;
+
+    // Define loops.
+    auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numLoops);
+    std::vector<Value> originalLoops;
+    originalLoops.reserve(numLoops);
+    for (auto result : loopsOp.getResults()) {
+      originalLoops.push_back(result);
+    }
+
+    // Define loop optimization.
+    auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numLoops);
+    std::vector<Value> optimizedLoops;
+    optimizedLoops.reserve(numLoops);
+    for (auto result : optimizedLoopsOp.getResults()) {
+      optimizedLoops.push_back(result);
+    }
+    Block &optimizationBlock = optimizedLoopsOp.region().front();
+
+    KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+    // Induction variables for the output matrix
+    for (int i = 0; i < 2; ++i) {
+      if (memRefShape[i] < 0) {
+        pack.pushConstantBound(0);
+        pack.pushOperandBound(
+            rewriter.create<DimOp>(loc, alloc, i).getResult());
+      } else {
+        pack.pushConstantBound(0);
+        pack.pushConstantBound(memRefShape[i]);
+      }
+    }
+    // Induction variable for the reduction dimension
+    if (ATy.getShape()[reductionDimIdx] < 0) {
+      pack.pushConstantBound(0);
+      pack.pushOperandBound(
+          rewriter.create<DimOp>(loc, A, reductionDimIdx).getResult());
+    } else {
+      pack.pushConstantBound(0);
+      pack.pushConstantBound(reductionDimIdx);
+    }
+
+    // Get run-time dimension information for unknown dimensions used for
+    // broadcasting.
+    // GemmOp supports unidirectional broadcasting from C to A*B.
+    // Hence, it must be enought to get broadcasting information for C only.
+    std::map<int, Value> broadcastedDimInfo =
+        getBroadcastedDimInfo(loc, rewriter, memRefType, {C})[0];
+
+    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+    Block &iterationBlock = iterateOp.bodyRegion().front();
+
+    // Now perform the insertions into the body of the
+    // just generated instructions:
+
+    // 1. Insert any optimizations in the KrnlOptimizeLoopsOp body.
+    rewriter.setInsertionPointToEnd(&optimizationBlock);
+    // Return from KrnlOptimizeLoopsOp body.
+    // When no optimizations are present we just return the loops unchaged.
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+    rewriter.setInsertionPoint(optimizedLoopsOp);
+
+    // 2. Insert instructions inside the KernelIterateOp body.
+    rewriter.setInsertionPointToStart(&iterationBlock);
+
+    // Handle the operation:
+    SmallVector<Value, 4> loopAIVs, loopBIVs, loopYIVs;
+    auto args = iterationBlock.getArguments();
+    loopAIVs.emplace_back(args[0]);
+    loopAIVs.emplace_back(args[2]);
+    loopBIVs.emplace_back(args[2]);
+    loopBIVs.emplace_back(args[1]);
+    loopYIVs.emplace_back(args[0]);
+    loopYIVs.emplace_back(args[1]);
+    auto loopCIVs = getLoopIVsForBroadcasting(
+        loc, rewriter, loopYIVs, C, broadcastedDimInfo);
+
+    // Gemm computation 
+    Value loadedA = rewriter.create<LoadOp>(loc, A, loopAIVs);
+    Value loadedB = rewriter.create<LoadOp>(loc, B, loopBIVs);
+    Value loadedC = rewriter.create<LoadOp>(loc, C, loopCIVs);
+    auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
+    auto alphaAB = rewriter.create<MulFOp>(loc, alpha, AB);
+    auto betaC = rewriter.create<MulFOp>(loc, beta, loadedC);
+    auto next = rewriter.create<AddFOp>(loc, alphaAB, betaC);
+
+    auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopYIVs);
+    auto Y = rewriter.create<AddFOp>(loc, loadedY, next);
+    // Store result in the resulting array.
+    rewriter.create<StoreOp>(loc, Y, alloc, loopYIVs);
+
+    rewriter.replaceOp(op, alloc);
+
+    return matchSuccess();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
 //===----------------------------------------------------------------------===//
@@ -1005,7 +1140,8 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXSumOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMaxOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMinOp>,
-                  ONNXReshapeOpLowering, ONNXEntryPointLowering>(&getContext());
+                  ONNXReshapeOpLowering, ONNXEntryPointLowering,
+                  ONNXGemmOpLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`
