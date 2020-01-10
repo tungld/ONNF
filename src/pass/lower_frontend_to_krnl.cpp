@@ -940,7 +940,6 @@ struct ONNXGemmOpLowering : public ConversionPattern {
       originalLoops.push_back(result);
     }
 
-    // Define loop optimization.
     auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numLoops);
     std::vector<Value> optimizedLoops;
     optimizedLoops.reserve(numLoops);
@@ -949,29 +948,54 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     }
     Block &optimizationBlock = optimizedLoopsOp.region().front();
 
-    KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-    // Induction variables for the output matrix
+    // We have two loops:
+    // - Outer loop iterates over the output matrix dimensions, and
+    // - Reduction loop iterates over the reduction dimension.
+    // Outer loops
+    std::vector<Value> outerLoops, optimizedOuterLoops;
+    outerLoops.reserve(2);
+    optimizedOuterLoops.reserve(2);
+    for (int i = 0; i < 2; ++i) {
+      outerLoops.push_back(originalLoops[i]);
+      optimizedOuterLoops.push_back(optimizedLoops[i]);
+    }
+    KrnlIterateOperandPack outerPack(rewriter, outerLoops,
+                                      optimizedOuterLoops);
+    // Induction variables for the outer loops
     for (int i = 0; i < 2; ++i) {
       if (memRefShape[i] < 0) {
-        pack.pushConstantBound(0);
-        pack.pushOperandBound(
+        outerPack.pushConstantBound(0);
+        outerPack.pushOperandBound(
             rewriter.create<DimOp>(loc, alloc, i).getResult());
       } else {
-        pack.pushConstantBound(0);
-        pack.pushConstantBound(memRefShape[i]);
+        outerPack.pushConstantBound(0);
+        outerPack.pushConstantBound(memRefShape[i]);
       }
     }
+    // Reduction loop
+    std::vector<Value> reductionLoops, optimizedReductionLoops;
+    reductionLoops.reserve(1);
+    optimizedReductionLoops.reserve(1);
+    reductionLoops.push_back(originalLoops[2]);
+    optimizedReductionLoops.push_back(optimizedLoops[2]);
+    KrnlIterateOperandPack reductionPack(rewriter, reductionLoops,
+                                         optimizedReductionLoops);
     // Induction variable for the reduction dimension
+    // Try to find and use a static value from A or B first.
+    // If it failed then use a dynamic value.
     auto ATy = A->getType().cast<MemRefType>();
-    int64_t reductionDimIdx = (isTransA) ? 0 : 1;
-    if (ATy.getShape()[reductionDimIdx] < 0) {
-      pack.pushConstantBound(0);
-      pack.pushOperandBound(
-          rewriter.create<DimOp>(loc, A, reductionDimIdx).getResult());
-    } else {
-      pack.pushConstantBound(0);
-      pack.pushConstantBound(ATy.getShape()[reductionDimIdx]);
-    }
+    auto BTy = B->getType().cast<MemRefType>();
+    int64_t K_A_Idx = (isTransA) ? 0 : 1;
+    int64_t K_B_Idx = (isTransB) ? 1 : 0;
+    reductionPack.pushConstantBound(0);
+    if (ATy.getShape()[K_A_Idx] != -1)
+        reductionPack.pushConstantBound(ATy.getShape()[K_A_Idx]);
+    else
+      if (BTy.getShape()[K_B_Idx] != -1)
+        reductionPack.pushConstantBound(BTy.getShape()[K_B_Idx]);
+      else
+        reductionPack.pushOperandBound(
+            rewriter.create<DimOp>(loc, B, K_B_Idx).getResult());
 
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
@@ -989,56 +1013,71 @@ struct ONNXGemmOpLowering : public ConversionPattern {
       }
     }
 
-    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
-    Block &iterationBlock = iterateOp.bodyRegion().front();
+    auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
 
     // Now perform the insertions into the body of the
     // just generated instructions:
 
-    // 1. Insert any optimizations in the KrnlOptimizeLoopsOp body.
+    // No optimization
     rewriter.setInsertionPointToEnd(&optimizationBlock);
-    // Return from KrnlOptimizeLoopsOp body.
-    // When no optimizations are present we just return the loops unchaged.
     rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
     rewriter.setInsertionPoint(optimizedLoopsOp);
 
-    // 2. Insert instructions inside the KernelIterateOp body.
-    rewriter.setInsertionPointToStart(&iterationBlock);
+    // Insert instructions inside the outer loop.
+    Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
+    rewriter.setInsertionPointToStart(&outerIterationBlock);
 
-    // Handle the operation:
-    SmallVector<Value, 4> loopAIVs, loopBIVs, loopYIVs;
-    auto args = iterationBlock.getArguments();
+    SmallVector<Value, 4> outerLoopIVs;
+    for (auto arg : outerIterationBlock.getArguments()) {
+      outerLoopIVs.push_back(arg);
+    }
+    // Compute alpha*A*B
+    auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, reductionPack);
+
+    // Compute alpha*A*B + beta*C (unidirectional broadcasting from C to A*B)
+    auto loopCIVs = getLoopIVsForBroadcasting(
+        loc, rewriter, outerLoopIVs, C, broadcastedDimInfo);
+    auto loadedC = rewriter.create<LoadOp>(loc, C, loopCIVs);
+    auto loadedAlphaAB = rewriter.create<LoadOp>(loc, alloc, outerLoopIVs);
+    auto betaC = rewriter.create<MulFOp>(loc, beta, loadedC);
+    auto Y = rewriter.create<AddFOp>(loc, loadedAlphaAB, betaC);
+    rewriter.create<StoreOp>(loc, Y, alloc, outerLoopIVs);
+
+    // Insert instructions to do matrix multiplication: alpha*A*B
+    Block &matmulIterationBlock = matmulIterateOp.bodyRegion().front();
+    rewriter.setInsertionPointToStart(&matmulIterationBlock);
+
+    // Handle induction variables.
+    SmallVector<Value, 4> loopIVs, loopAIVs, loopBIVs, loopYIVs;
+    for (auto arg : outerLoopIVs)
+      loopIVs.push_back(arg);
+    for (auto arg : matmulIterationBlock.getArguments())
+      loopIVs.push_back(arg);
     if (isTransA) {
-      loopAIVs.emplace_back(args[2]);
-      loopAIVs.emplace_back(args[0]);
+      loopAIVs.emplace_back(loopIVs[2]);
+      loopAIVs.emplace_back(loopIVs[0]);
     } else {
-      loopAIVs.emplace_back(args[0]);
-      loopAIVs.emplace_back(args[2]);
+      loopAIVs.emplace_back(loopIVs[0]);
+      loopAIVs.emplace_back(loopIVs[2]);
     }
     if (isTransB) {
-      loopBIVs.emplace_back(args[1]);
-      loopBIVs.emplace_back(args[2]);
+      loopBIVs.emplace_back(loopIVs[1]);
+      loopBIVs.emplace_back(loopIVs[2]);
     } else {
-      loopBIVs.emplace_back(args[2]);
-      loopBIVs.emplace_back(args[1]);
+      loopBIVs.emplace_back(loopIVs[2]);
+      loopBIVs.emplace_back(loopIVs[1]);
     }
-    loopYIVs.emplace_back(args[0]);
-    loopYIVs.emplace_back(args[1]);
-    auto loopCIVs = getLoopIVsForBroadcasting(
-        loc, rewriter, loopYIVs, C, broadcastedDimInfo);
+    loopYIVs.emplace_back(loopIVs[0]);
+    loopYIVs.emplace_back(loopIVs[1]);
 
-    // Gemm computation 
+    // Matmul computation
     auto loadedA = rewriter.create<LoadOp>(loc, A, loopAIVs);
     auto loadedB = rewriter.create<LoadOp>(loc, B, loopBIVs);
-    auto loadedC = rewriter.create<LoadOp>(loc, C, loopCIVs);
+    auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopYIVs);
     auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
     auto alphaAB = rewriter.create<MulFOp>(loc, alpha, AB);
-    auto betaC = rewriter.create<MulFOp>(loc, beta, loadedC);
-    auto next = rewriter.create<AddFOp>(loc, alphaAB, betaC);
-
-    auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopYIVs);
-    auto Y = rewriter.create<AddFOp>(loc, loadedY, next);
-    rewriter.create<StoreOp>(loc, Y, alloc, loopYIVs);
+    auto accumulated = rewriter.create<AddFOp>(loc, loadedY, alphaAB);
+    rewriter.create<StoreOp>(loc, accumulated, alloc, loopYIVs);
 
     rewriter.replaceOp(op, alloc);
 
