@@ -524,91 +524,11 @@ private:
     return SymbolRefAttr::get(fnName, context);
   }
 };
-
 } // end namespace
 
 //===----------------------------------------------------------------------===//
 // KRNL + Stadard + Affine dialects lowering to LLVM.
 //===----------------------------------------------------------------------===//
-//===----------------------------------------------------------------------===//
-// KRNL to LLVM: KrnlMemcpyOpLowering
-//===----------------------------------------------------------------------===//
-
-class KrnlMemcpyOpLowering : public ConversionPattern {
-public:
-  explicit KrnlMemcpyOpLowering(MLIRContext *context)
-      : ConversionPattern(KrnlMemcpyOp::getOperationName(), 1, context) {}
-
-  PatternMatchResult
-  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto *context = op->getContext();
-    auto loc = op->getLoc();
-    auto *llvmDialect =
-        op->getContext()->getRegisteredDialect<LLVM::LLVMDialect>();
-    assert(llvmDialect && "expected llvm dialect to be registered");
-
-    // Get a symbol reference to the memcpy function, inserting it if necessary.
-    ModuleOp parentModule = op->getParentOfType<ModuleOp>();
-    auto memcpyRef = getOrInsertMemcpy(rewriter, parentModule, llvmDialect);
-
-    // First operand.
-    Type dstType =
-        operands[0]->getType().cast<LLVM::LLVMType>().getStructElementType(1);
-    Value alignedDstMemory = rewriter.create<LLVM::ExtractValueOp>(
-        loc, dstType, operands[0], rewriter.getI64ArrayAttr(1));
-    Value alignedInt8PtrDstMemory = rewriter.create<LLVM::BitcastOp>(
-        loc, LLVM::LLVMType::getInt8PtrTy(llvmDialect), alignedDstMemory);
-
-    // Second operand.
-    Type srcType =
-        operands[1]->getType().cast<LLVM::LLVMType>().getStructElementType(1);
-    Value alignedSrcMemory = rewriter.create<LLVM::ExtractValueOp>(
-        loc, srcType, operands[1], rewriter.getI64ArrayAttr(1));
-    Value alignedInt8PtrSrcMemory = rewriter.create<LLVM::BitcastOp>(
-        loc, LLVM::LLVMType::getInt8PtrTy(llvmDialect), alignedSrcMemory);
-
-    // Size.
-    Value int64Size = rewriter.create<LLVM::SExtOp>(
-        loc, LLVM::LLVMType::getInt64Ty(llvmDialect), operands[2]);
-
-    // Memcpy call
-    rewriter.create<CallOp>(
-        loc, memcpyRef, LLVM::LLVMType::getVoidTy(llvmDialect),
-        ArrayRef<Value>(
-            {alignedInt8PtrDstMemory, alignedInt8PtrSrcMemory, int64Size}));
-
-    rewriter.eraseOp(op);
-    return matchSuccess();
-  }
-
-private:
-  /// Return a symbol reference to the memcpy function, inserting it into the
-  /// module if necessary.
-  static FlatSymbolRefAttr getOrInsertMemcpy(PatternRewriter &rewriter,
-                                             ModuleOp module,
-                                             LLVM::LLVMDialect *llvmDialect) {
-    auto *context = module.getContext();
-    if (module.lookupSymbol<LLVM::LLVMFuncOp>("llvm.memcpy.p0i8.p0i8.i64"))
-      return SymbolRefAttr::get("llvm.memcpy.p0i8.p0i8.i64", context);
-    // Create a function declaration for memcpy, the signature is:
-    //   * `void (i8*, i8* , i64, i1)`
-    auto llvmVoidTy = LLVM::LLVMType::getVoidTy(llvmDialect);
-    auto llvmI8PtrTy = LLVM::LLVMType::getInt8PtrTy(llvmDialect);
-    auto llvmI64Ty = LLVM::LLVMType::getInt64Ty(llvmDialect);
-    auto llvmFnType = LLVM::LLVMType::getFunctionTy(
-        llvmVoidTy,
-        ArrayRef<mlir::LLVM::LLVMType>({llvmI8PtrTy, llvmI8PtrTy, llvmI64Ty}),
-        false);
-
-    // Insert the memcpy function into the body of the parent module.
-    PatternRewriter::InsertionGuard insertGuard(rewriter);
-    rewriter.setInsertionPointToStart(module.getBody());
-    rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(),
-                                      "llvm.memcpy.p0i8.p0i8.i64", llvmFnType);
-    return SymbolRefAttr::get("llvm.memcpy.p0i8.p0i8.i64", context);
-  }
-};
 
 namespace {
 struct KrnlToLLVMLoweringPass : public ModulePass<KrnlToLLVMLoweringPass> {
