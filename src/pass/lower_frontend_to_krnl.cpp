@@ -948,7 +948,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     }
     Block &optimizationBlock = optimizedLoopsOp.region().front();
 
-    // We have two loops:
+    // We have two Krnl loops:
     // - Outer loop iterates over the output matrix dimensions, and
     // - Reduction loop iterates over the reduction dimension.
     // Outer loops
