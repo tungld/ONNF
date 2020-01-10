@@ -190,3 +190,14 @@ def KrnlMemcpyOp : Op<Krnl_Dialect, "memcpy"> {
   let parser = ?;
   let printer = ?;
 }
+
+def KrnlSqrtOp : Op<Krnl_Dialect, "sqrt", [NoSideEffect]> {
+  let summary = "Krnl sqrt operation";
+  let description = [{
+    "The `sqrt` computes the square root value. It takes one operand and return
+    one result with the same type. This may be a float scalar type, a vector
+    whose element type is float, or a tensor of floats."
+  }];
+  let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$operand);
+  let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>);
+}
