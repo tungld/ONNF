@@ -951,7 +951,8 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // We have two Krnl loops:
     // - Outer loop iterates over the output matrix dimensions, and
     // - Reduction loop iterates over the reduction dimension.
-    // Outer loops
+
+    // Outer loop
     std::vector<Value> outerLoops, optimizedOuterLoops;
     outerLoops.reserve(2);
     optimizedOuterLoops.reserve(2);
@@ -1027,57 +1028,55 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
     rewriter.setInsertionPointToStart(&outerIterationBlock);
 
-    SmallVector<Value, 4> outerLoopIVs;
+    // Induction variables
+    SmallVector<Value, 4> loopMNIVs;
     for (auto arg : outerIterationBlock.getArguments()) {
-      outerLoopIVs.push_back(arg);
+      loopMNIVs.push_back(arg);
     }
+
     // Compute alpha*A*B
     auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, reductionPack);
 
-    // Compute alpha*A*B + beta*C (unidirectional broadcasting from C to A*B)
+    // Compute beta*C, and add up to alpha*A*B (unidirectional broadcasting)
     auto loopCIVs = getLoopIVsForBroadcasting(
-        loc, rewriter, outerLoopIVs, C, broadcastedDimInfo);
+        loc, rewriter, loopMNIVs, C, broadcastedDimInfo);
     auto loadedC = rewriter.create<LoadOp>(loc, C, loopCIVs);
-    auto loadedAlphaAB = rewriter.create<LoadOp>(loc, alloc, outerLoopIVs);
+    auto loadedAlphaAB = rewriter.create<LoadOp>(loc, alloc, loopMNIVs);
     auto betaC = rewriter.create<MulFOp>(loc, beta, loadedC);
     auto Y = rewriter.create<AddFOp>(loc, loadedAlphaAB, betaC);
-    rewriter.create<StoreOp>(loc, Y, alloc, outerLoopIVs);
+    rewriter.create<StoreOp>(loc, Y, alloc, loopMNIVs);
 
     // Insert instructions to do matrix multiplication: alpha*A*B
     Block &matmulIterationBlock = matmulIterateOp.bodyRegion().front();
     rewriter.setInsertionPointToStart(&matmulIterationBlock);
 
-    // Handle induction variables.
-    SmallVector<Value, 4> loopIVs, loopAIVs, loopBIVs, loopYIVs;
-    for (auto arg : outerLoopIVs)
-      loopIVs.push_back(arg);
+    // Induction variables
+    SmallVector<Value, 4> loopKIVs, loopAIVs, loopBIVs;
     for (auto arg : matmulIterationBlock.getArguments())
-      loopIVs.push_back(arg);
+      loopKIVs.push_back(arg);
     if (isTransA) {
-      loopAIVs.emplace_back(loopIVs[2]);
-      loopAIVs.emplace_back(loopIVs[0]);
+      loopAIVs.emplace_back(loopKIVs[0]);
+      loopAIVs.emplace_back(loopMNIVs[0]);
     } else {
-      loopAIVs.emplace_back(loopIVs[0]);
-      loopAIVs.emplace_back(loopIVs[2]);
+      loopAIVs.emplace_back(loopMNIVs[0]);
+      loopAIVs.emplace_back(loopKIVs[0]);
     }
     if (isTransB) {
-      loopBIVs.emplace_back(loopIVs[1]);
-      loopBIVs.emplace_back(loopIVs[2]);
+      loopBIVs.emplace_back(loopMNIVs[1]);
+      loopBIVs.emplace_back(loopKIVs[0]);
     } else {
-      loopBIVs.emplace_back(loopIVs[2]);
-      loopBIVs.emplace_back(loopIVs[1]);
+      loopBIVs.emplace_back(loopKIVs[0]);
+      loopBIVs.emplace_back(loopMNIVs[1]);
     }
-    loopYIVs.emplace_back(loopIVs[0]);
-    loopYIVs.emplace_back(loopIVs[1]);
 
     // Matmul computation
     auto loadedA = rewriter.create<LoadOp>(loc, A, loopAIVs);
     auto loadedB = rewriter.create<LoadOp>(loc, B, loopBIVs);
-    auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopYIVs);
+    auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopMNIVs);
     auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
     auto alphaAB = rewriter.create<MulFOp>(loc, alpha, AB);
     auto accumulated = rewriter.create<AddFOp>(loc, loadedY, alphaAB);
-    rewriter.create<StoreOp>(loc, accumulated, alloc, loopYIVs);
+    rewriter.create<StoreOp>(loc, accumulated, alloc, loopMNIVs);
 
     rewriter.replaceOp(op, alloc);
 
