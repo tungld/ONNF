@@ -500,7 +500,7 @@ public:
   }
 
 private:
-  /// Return a symbol reference to the memcpy function, inserting it into the
+  /// Return a symbol reference to the sqrt function, inserting it into the
   /// module if necessary.
   static FlatSymbolRefAttr getOrInsertSqrt(PatternRewriter &rewriter,
                                            ModuleOp module,
