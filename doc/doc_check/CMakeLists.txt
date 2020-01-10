@@ -1,6 +1,4 @@
-find_package(Python3 REQUIRED
-             COMPONENTS Interpreter)
-
+find_package(PythonLibs 3)
 add_custom_target(check-doc
         COMMAND Python3::Interpreter
                     ${CMAKE_CURRENT_SOURCE_DIR}/check.py

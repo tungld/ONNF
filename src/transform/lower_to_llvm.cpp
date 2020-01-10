@@ -472,23 +472,20 @@ public:
         op->getContext()->getRegisteredDialect<LLVM::LLVMDialect>();
     assert(llvmDialect && "expected llvm dialect to be registered");
 
-    OperandAdaptor<KrnlSqrtOp> transformed(operands);
+    OperandAdaptor<KrnlSqrtOp> adaptor(operands);
     LLVM::LLVMType operandType =
-        transformed.operand()->getType().dyn_cast_or_null<LLVM::LLVMType>();
+        adaptor.operand()->getType().dyn_cast_or_null<LLVM::LLVMType>();
+
+    if (!operandType)
+      return matchFailure();
 
     std::string functionName;
-    if (operandType.isFloatTy()) {
-      switch (operandType.getKind()) {
-      case mlir::StandardTypes::F32:
-        functionName = "llvm.sqrt.f32";
-      case mlir::StandardTypes::F64:
-        functionName = "llvm.sqrt.f64";
-      default:
-        assert(1 == 0); // TODO(tung): emit error
-      }
-    } else {
-      assert(1 == 0);
-    }
+    if (operandType.isFloatTy())
+      functionName = "llvm.sqrt.f32";
+    else if (operandType.isDoubleTy())
+      functionName = "llvm.sqrt.f64";
+    else
+      assert(false && "Unsupported operand type.");
 
     // Get a symbol reference to the sqrt function, inserting it if necessary.
     ModuleOp parentModule = op->getParentOfType<ModuleOp>();
@@ -497,7 +494,7 @@ public:
 
     // Sqrt call
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, operandType, sqrtRef,
-                                              transformed.operand());
+                                              adaptor.operand());
 
     return matchSuccess();
   }
