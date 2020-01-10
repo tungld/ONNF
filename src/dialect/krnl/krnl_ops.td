@@ -194,7 +194,7 @@ def KrnlMemcpyOp : Op<Krnl_Dialect, "memcpy"> {
 def KrnlSqrtOp : Op<Krnl_Dialect, "sqrt", [NoSideEffect]> {
   let summary = "Krnl sqrt operation";
   let description = [{
-    "The `sqrt` computes the square root value. It takes one operand and return
+    "The `sqrt` computes the square root value. It takes one operand and returns
     one result with the same type."
   }];
 
