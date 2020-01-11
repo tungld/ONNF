@@ -466,12 +466,6 @@ public:
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    auto *context = op->getContext();
-    auto loc = op->getLoc();
-    auto *llvmDialect =
-        op->getContext()->getRegisteredDialect<LLVM::LLVMDialect>();
-    assert(llvmDialect && "expected llvm dialect to be registered");
-
     OperandAdaptor<KrnlSqrtOp> adaptor(operands);
     LLVM::LLVMType operandType =
         adaptor.operand()->getType().dyn_cast_or_null<LLVM::LLVMType>();
@@ -489,8 +483,8 @@ public:
 
     // Get a symbol reference to the sqrt function, inserting it if necessary.
     ModuleOp parentModule = op->getParentOfType<ModuleOp>();
-    auto sqrtRef = getOrInsertSqrt(rewriter, parentModule, llvmDialect,
-                                   functionName, operandType);
+    auto sqrtRef =
+        getOrInsertSqrt(rewriter, parentModule, functionName, operandType);
 
     // Sqrt call
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, operandType, sqrtRef,
@@ -503,24 +497,20 @@ private:
   /// Return a symbol reference to the sqrt function, inserting it into the
   /// module if necessary.
   static FlatSymbolRefAttr getOrInsertSqrt(PatternRewriter &rewriter,
-                                           ModuleOp module,
-                                           LLVM::LLVMDialect *llvmDialect,
-                                           std::string fnName,
-                                           mlir::LLVM::LLVMType operandType) {
+                                           ModuleOp module, std::string fnName,
+                                           LLVM::LLVMType operandType) {
     auto *context = module.getContext();
     if (module.lookupSymbol<LLVM::LLVMFuncOp>(fnName))
       return SymbolRefAttr::get(fnName, context);
     // Create a function declaration for sqrt, the signature is:
     //   * `float (float)`
-    auto llvmFnType = LLVM::LLVMType::getFunctionTy(
-        operandType, operandType,
-        false);
+    auto llvmFnType =
+        LLVM::LLVMType::getFunctionTy(operandType, operandType, false);
 
     // Insert the sqrt function into the body of the parent module.
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(module.getBody());
-    rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), fnName,
-                                      llvmFnType);
+    rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), fnName, llvmFnType);
     return SymbolRefAttr::get(fnName, context);
   }
 };
