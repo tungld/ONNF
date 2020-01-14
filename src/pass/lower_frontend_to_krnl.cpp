@@ -339,7 +339,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                                       tensor_to_memref_converter);
 
   // Frontent operation lowering.
-  populateLoweringElemenWiseOpPattern(patterns, &getContext());
+  populateLoweringElementwiseOpPattern(patterns, &getContext());
   populateLoweringTensorOpPattern(patterns, &getContext());
   patterns.insert<ONNXEntryPointLowering>(&getContext());
 

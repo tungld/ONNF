@@ -1,4 +1,4 @@
-//===----- lower_frontend_to_krnl_elementwise.inc - Lower Elementwise Ops -===//
+//===----- lower_frontend_to_krnl_elementwise.inc - Elementwise Ops -------===//
 //
 // Copyright 2019 The IBM Research Authors.
 //
@@ -607,7 +607,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringElemenWiseOpPattern(
+void populateLoweringElementwiseOpPattern(
     OwningRewritePatternList &patterns, MLIRContext *ctx) {
   patterns.insert<ONNXElementwiseVariadicOpLowering<mlir::ONNXAddOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXAndOp>,
