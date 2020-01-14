@@ -984,8 +984,8 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // Induction variable for the reduction dimension
     // Try to find and use a static value from A or B first.
     // If it failed then use a dynamic value.
-    auto ATy = A->getType().cast<MemRefType>();
-    auto BTy = B->getType().cast<MemRefType>();
+    auto ATy = A.getType().cast<MemRefType>();
+    auto BTy = B.getType().cast<MemRefType>();
     int64_t K_A_Idx = (isTransA) ? 0 : 1;
     int64_t K_B_Idx = (isTransB) ? 1 : 0;
     reductionPack.pushConstantBound(0);
@@ -1003,7 +1003,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // GemmOp supports unidirectional broadcasting from C to A*B.
     // Hence, it must be enough to get broadcasting information for C only.
     std::map<int, Value> broadcastedDimInfo;
-    auto shape = C->getType().cast<MemRefType>().getShape();
+    auto shape = C.getType().cast<MemRefType>().getShape();
     for (int i = 0; i < shape.size(); ++i) {
       if (shape[i] < 0) {
         auto dim = rewriter.create<DimOp>(loc, C, i).getResult();
