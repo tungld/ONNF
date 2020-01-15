@@ -235,8 +235,8 @@ namespace {
 // Besides, it is better to put operators with the same computation pattern into
 // the same category, e.g. element-wise operators will belong to the elementwise
 // category.
-#include "src/pass/lower_frontend_to_krnl_elementwise.inc"
-#include "src/pass/lower_frontend_to_krnl_tensor.inc"
+#include "src/pass/lower_frontend_to_krnl/math/elementwise.inc"
+#include "src/pass/lower_frontend_to_krnl/tensor/reshape.inc"
 
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
@@ -339,8 +339,8 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                                       tensor_to_memref_converter);
 
   // Frontent operation lowering.
-  populateLoweringElementwiseOpPattern(patterns, &getContext());
-  populateLoweringTensorOpPattern(patterns, &getContext());
+  populateLoweringONNXElementwiseOpPattern(patterns, &getContext());
+  populateLoweringONNXReshapeOpPattern(patterns, &getContext());
   patterns.insert<ONNXEntryPointLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the

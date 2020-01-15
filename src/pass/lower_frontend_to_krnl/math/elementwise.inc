@@ -1,11 +1,10 @@
-//===----- lower_frontend_to_krnl_elementwise.inc - Elementwise Ops -------===//
+//===----- elementwise.inc - Elementwise Ops ------------------------------===//
 //
 // Copyright 2019 The IBM Research Authors.
 //
 // =============================================================================
 //
-// This file lowers ONNX element-wise operators into operations in the Krnl
-// dialect.
+// This file lowers ONNX element-wise operators into operations to Krnl dialect.
 //
 //===----------------------------------------------------------------------===//
 
@@ -607,7 +606,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringElementwiseOpPattern(
+void populateLoweringONNXElementwiseOpPattern(
     OwningRewritePatternList &patterns, MLIRContext *ctx) {
   patterns.insert<ONNXElementwiseVariadicOpLowering<mlir::ONNXAddOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXAndOp>,

@@ -1,17 +1,13 @@
-//===----- lower_frontend_to_krnl_tensor.inc - Tensor Ops -----------------===//
+//===----- reshape.inc - Lowering Reshape Op ------------------------------===//
 //
 // Copyright 2019 The IBM Research Authors.
 //
 // =============================================================================
 //
-// This file lowers ONNX tensor-related operators into operations in the Krnl
-// dialects.
+// This file lowers the ONNX Reshape Operator to Krnl dialect.
 //
 //===----------------------------------------------------------------------===//
 
-//===----------------------------------------------------------------------===//
-// Reshape ops lowering to Krnl dialect.
-//===----------------------------------------------------------------------===//
 struct ONNXReshapeOpLowering : public ConversionPattern {
   ONNXReshapeOpLowering(MLIRContext *ctx)
       : ConversionPattern(mlir::ONNXReshapeOp::getOperationName(), 1, ctx) {}
@@ -69,7 +65,7 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   }
 };
 
-void populateLoweringTensorOpPattern(
+void populateLoweringONNXReshapeOpPattern(
     OwningRewritePatternList &patterns, MLIRContext *ctx) {
   patterns.insert<ONNXReshapeOpLowering>(ctx);
 }
