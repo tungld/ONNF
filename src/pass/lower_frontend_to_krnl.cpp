@@ -882,6 +882,23 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
 };
 
 //===----------------------------------------------------------------------===//
+// Reduction ops lowering to Krnl dialect.
+//===----------------------------------------------------------------------===//
+template <typename ONNXReductionOp>
+struct ONNXReductionOpLowering : public ConversionPattern {
+  ONNXReductionOpLowering(MLIRContext *ctx)
+      : ConversionPattern(ONNXReductionOp::getOperationName(), 1, ctx) {}
+
+  PatternMatchResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+
+    auto loc = op->getLoc();
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
 //===----------------------------------------------------------------------===//
 

@@ -24,6 +24,35 @@ using namespace mlir;
 using namespace mlir::OpTrait::util;
 
 //===----------------------------------------------------------------------===//
+// Get reduction type
+//===----------------------------------------------------------------------===//
+RankedTensorType getReductionType(RankedTensorType operandTy,
+                                  ArrayRef<int64_t> axes, int64_t keepdims) {
+  int64_t rank = operandTy.getRank();
+
+  // Mark reduction axes.
+  std::vector<bool> isReductionAxis;
+  for (int i = 0; i < rank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end())
+      isReductionAxis.push_back(true);
+    else
+      isReductionAxis.push_back(false);
+  }
+
+  SmallVector<int64_t, 4> dims;
+  for (int i = 0; i < rank; ++i) {
+    if (isReductionAxis[i]) {
+      if (keepdims)
+        dims.push_back(1); // reduction dimension
+    } else {
+      dims.push_back(operandTy.getShape()[i]);
+    }
+  }
+
+  return RankedTensorType::get(dims, operandTy.getElementType());
+}
+
+//===----------------------------------------------------------------------===//
 // ONNXOpsDialect
 //===----------------------------------------------------------------------===//
 
@@ -412,6 +441,40 @@ void ONNXTransposeOp::inferShapes() {
   auto arrayTy = getOperand().getType().cast<RankedTensorType>();
   SmallVector<int64_t, 2> dims(llvm::reverse(arrayTy.getShape()));
   getResult().setType(RankedTensorType::get(dims, arrayTy.getElementType()));
+}
+
+//===----------------------------------------------------------------------===//
+
+// ReduceMax
+
+void ONNXReduceMaxOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>()) {
+    emitError("Shape tensor not ranked.");
+    return;
+  }
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  int64_t rank = operandTy.getRank();
+
+  // TODO (tungld): `axes` is a list of ints
+  IntegerAttr axisAttr = getAttrOfType<IntegerAttr>("axes");
+  std::vector<int64_t> axes;
+  if (axisAttr) {
+    int64_t axis = axisAttr.getInt();
+    axis = axis >= 0 ? axis : (rank + axis);
+    assert(axis >= -rank && axis <= rank - 1);
+    axes.push_back(axis);
+  } else {
+    for (int i = 0; i < rank; ++i) {
+      axes.push_back(i);
+    }
+  }
+
+  // KeepDims
+  int64_t keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
+  bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+
+  getResult().setType(getReductionType(operandTy, axes, isKeepdims));
 }
 
 //===----------------------------------------------------------------------===//

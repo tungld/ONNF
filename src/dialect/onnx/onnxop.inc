@@ -2097,7 +2097,7 @@ def ONNXReduceLogSumExpOp:ONNX_Op<"ReduceLogSumExp",
 }
 
 def ONNXReduceMaxOp:ONNX_Op<"ReduceMax", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX ReduceMax operation";
   let description = [{
     "Computes the max of the input tensor's element along the provided axes. The resulted"
