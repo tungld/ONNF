@@ -4,7 +4,7 @@
 //
 // =============================================================================
 //
-// This file lowers ONNX element-wise operators into operations to Krnl dialect.
+// This file lowers ONNX element-wise operators to Krnl dialect.
 //
 //===----------------------------------------------------------------------===//
 
