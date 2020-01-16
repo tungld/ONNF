@@ -445,9 +445,9 @@ void ONNXTransposeOp::inferShapes() {
 
 //===----------------------------------------------------------------------===//
 
-// ReduceMax
+// ReduceSum
 
-void ONNXReduceMaxOp::inferShapes() {
+void ONNXReduceSumOp::inferShapes() {
   if (!getOperand().getType().isa<RankedTensorType>()) {
     emitError("Shape tensor not ranked.");
     return;

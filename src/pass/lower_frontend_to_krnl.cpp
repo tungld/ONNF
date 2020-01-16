@@ -130,6 +130,38 @@ static bool checkInsertDealloc(Operation *currentOp) {
   return insertDealloc;
 }
 
+// Create a mapping between an input type's dimensions and a result type's
+// dimensions, given that the result type is the result of a reduction op over
+// the input type.
+std::map<int64_t, int64_t> getReductionMapping(MemRefType inputTy,
+                                               ArrayRef<int64_t> axes,
+                                               bool keepdims) {
+  std::map<int64_t, int64_t> OutInDimMap;
+  int64_t rank = inputTy.getRank();
+
+  // Mark reduction axes.
+  std::vector<bool> isReductionAxis;
+  for (int i = 0; i < rank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end())
+      isReductionAxis.push_back(true);
+    else
+      isReductionAxis.push_back(false);
+  }
+
+  for (int inIndex = 0, outIndex = 0; inIndex < rank; ++inIndex) {
+    // If it is a reduction axis, there is no relationship among dimensions.
+    if (isReductionAxis[inIndex]) {
+      if (keepdims)
+        outIndex++;
+    } else {
+      OutInDimMap.insert(std::make_pair(outIndex, inIndex));
+      outIndex++;
+    }
+  }
+
+  return OutInDimMap;
+}
+
 unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
   auto elementType = memRefType.getElementType();
 
@@ -304,10 +336,33 @@ struct ScalarOp<ONNXLogOp> {
   using IOp = LogOp; // not use
 };
 
+template <>
+struct ScalarOp<ONNXReduceSumOp> {
+  using FOp = AddFOp;
+  using IOp = AddIOp;
+};
+
 template <typename ElementwiseNaryOp>
 using ScalarFOp = typename ScalarOp<ElementwiseNaryOp>::FOp;
 template <typename ElementwiseNaryOp>
 using ScalarIOp = typename ScalarOp<ElementwiseNaryOp>::IOp;
+
+// Get the identity element of a operation.
+// Return NULL if the function does not have identity.
+template <typename DataType, typename Op>
+DataType getIdentityValue() {
+  return NULL;
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceSumOp>(){
+  return (float)0;
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceSumOp>(){
+  return 0;
+}
 
 //===----------------------------------------------------------------------===//
 // Scalar unary ops for lowering to Krnl dialect.
@@ -892,9 +947,211 @@ struct ONNXReductionOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
-
+    /*
+     * Condition: reduction function must be associative and communicative.
+     *
+     * Example 1 (here, reduction function is `+`):
+     * Induction variables: (i1,i2,i3)
+     * axes = (0,2)
+     * keepdims = true
+     * for i1, i2, i3
+     *   Y(0, i2, 0) += X(i1, i2, i3)
+     *
+     * Example 2 (here, reduction function is `+`):
+     * Induction variables: (i1,i2,i3)
+     * axes = (0,2)
+     * keepdims = false
+     * for i1, i2, i3
+     *   Y(i2) += X(i1, i2, i3)
+     *
+    */
     auto loc = op->getLoc();
+    auto memRefInType = operands[0].getType().cast<MemRefType>();
+    auto memRefInShape = memRefInType.getShape();
+    auto tensorOutType = (*op->result_type_begin()).cast<TensorType>();
+    int64_t inRank = memRefInType.getRank();
+    int64_t outRank = tensorOutType.getRank();
+
+    // Get attributes
+    // TODO (tungld): `axes` is a list of ints
+    IntegerAttr axisAttr = op->getAttrOfType<IntegerAttr>("axes");
+    std::vector<int64_t> axes;
+    if (axisAttr) {
+      int64_t axis = axisAttr.getInt();
+      axis = axis >= 0 ? axis : (outRank + axis);
+      assert(axis >= -outRank && axis <= outRank - 1);
+      axes.push_back(axis);
+    } else {
+      for (int i = 0; i < outRank; ++i) {
+        axes.push_back(i);
+      }
+    }
+    // KeepDims
+    int64_t keepdimsAttr = op->getAttrOfType<IntegerAttr>("keepdims").getInt();
+    bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+
+    // Get type information
+    auto memRefOutType = convertTensorToMemRef(tensorOutType);
+    auto memRefOutShape = memRefOutType.getShape();
+    auto elementOutType = memRefOutType.getElementType();
+    std::map<int64_t, int64_t> outInDimMap =
+        getReductionMapping(memRefInType, axes, isKeepdims);
+
+    // Insert an allocation and deallocation for the result of this operation.
+    Value alloc;
+    bool insertDealloc = checkInsertDealloc(op);
+    if (hasAllConstantDimensions(memRefOutType)) {
+      alloc = insertAllocAndDealloc(memRefOutType, loc, rewriter, insertDealloc);
+    } else {
+      SmallVector<Value, 2> allocOperands;
+      for (int i = 0; i < outRank; ++i) {
+        if (memRefOutShape[i] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, operands[0], outInDimMap[i]);
+          allocOperands.push_back(dim);
+        }
+      }
+      alloc = rewriter.create<AllocOp>(loc, memRefOutType, allocOperands);
+      if (insertDealloc) {
+        auto *parentBlock = alloc.getDefiningOp()->getBlock();
+        auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
+        dealloc.getOperation()->moveBefore(&parentBlock->back());
+      }
+    }
+
+    // There are two Krnl loops:
+    // - One to initialize the result memref, and
+    // - One to do reduction
+
+    // Define an loop to initialize the result.
+    auto loopsOpInit = rewriter.create<KrnlDefineLoopsOp>(loc, outRank);
+    std::vector<Value> originalLoopsInit;
+    originalLoopsInit.reserve(outRank);
+    for (auto result : loopsOpInit.getResults()) {
+      originalLoopsInit.push_back(result);
+    }
+    // Loop optimization.
+    auto optimizedLoopsOpInit =
+        rewriter.create<KrnlOptimizeLoopsOp>(loc, outRank);
+    std::vector<Value> optimizedLoopsInit;
+    optimizedLoopsInit.reserve(outRank);
+    for (auto result : optimizedLoopsOpInit.getResults()) {
+      optimizedLoopsInit.push_back(result);
+    }
+    Block &optimizationBlockInit = optimizedLoopsOpInit.region().front();
+    // Iteration information
+    KrnlIterateOperandPack packInit(rewriter, originalLoopsInit,
+        optimizedLoopsInit);
+    for (int i = 0; i < outRank; ++i) {
+      if (memRefOutShape[i] < 0) {
+        packInit.pushConstantBound(0);
+        packInit.pushOperandBound(
+            rewriter.create<DimOp>(loc, alloc, i).getResult());
+      } else {
+        packInit.pushConstantBound(0);
+        packInit.pushConstantBound(memRefOutShape[i]);
+      }
+    }
+    auto iterateOpInit = rewriter.create<KrnlIterateOp>(loc, packInit);
+    Block &iterationBlockInit = iterateOpInit.bodyRegion().front();
+
+    // Perform the insertions into the body of the initialization loop.
+    // No optimization
+    rewriter.setInsertionPointToEnd(&optimizationBlockInit);
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoopsInit);
+    rewriter.setInsertionPoint(optimizedLoopsOpInit);
+
+    // Insert instructions inside the KernelIterateOp body.
+    rewriter.setInsertionPointToStart(&iterationBlockInit);
+
+    // Handle the operation:
+    SmallVector<Value, 4> loopIVs;
+    for (auto arg : iterationBlockInit.getArguments()) {
+      loopIVs.push_back(arg);
+    }
+
+    Value identity;
+    if (elementOutType.isa<FloatType>()) {
+      identity = rewriter.create<ConstantOp>(
+          loc, FloatAttr::get(elementOutType,
+                              getIdentityValue<float, ONNXReductionOp>()));
+    } else if (elementOutType.isa<IntegerType>()) {
+      identity = rewriter.create<ConstantOp>(
+          loc, IntegerAttr::get(elementOutType,
+                                getIdentityValue<int, ONNXReductionOp>()));
+    } else {
+      emitError(loc, "unsupported element type");
+    }
+    rewriter.create<StoreOp>(loc, identity, alloc, loopIVs);
+
+    // Define an Krnl loop to do reduction.
+    rewriter.setInsertionPointAfter(iterateOpInit);
+    auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, inRank);
+    std::vector<Value> originalLoops;
+    originalLoops.reserve(inRank);
+    for (auto result : loopsOp.getResults()) {
+      originalLoops.push_back(result);
+    }
+    // Loop optimization.
+    auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, inRank);
+    std::vector<Value> optimizedLoops;
+    optimizedLoops.reserve(inRank);
+    for (auto result : optimizedLoopsOp.getResults()) {
+      optimizedLoops.push_back(result);
+    }
+    Block &optimizationBlock = optimizedLoopsOp.region().front();
+    // Iteration information
+    KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+    for (int i = 0; i < inRank; ++i) {
+      if (memRefInShape[i] < 0) {
+        pack.pushConstantBound(0);
+        pack.pushOperandBound(
+            rewriter.create<DimOp>(loc, operands[0], i).getResult());
+      } else {
+        pack.pushConstantBound(0);
+        pack.pushConstantBound(memRefInShape[i]);
+      }
+    }
+    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+    Block &iterationBlock = iterateOp.bodyRegion().front();
+
+    // Perform the insertions into the body of the reduction loop.
+    // No optimization
+    rewriter.setInsertionPointToEnd(&optimizationBlock);
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+    rewriter.setInsertionPoint(optimizedLoopsOp);
+
+    // Insert instructions inside the KernelIterateOp body.
+    rewriter.setInsertionPointToStart(&iterationBlock);
+
+    // Handle the operation:
+    SmallVector<Value, 4> inLoopIVs, outLoopIVs;
+    auto args = iterationBlock.getArguments();
+    for (int i = 0; i < args.size(); ++i) {
+      inLoopIVs.push_back(args[i]);
+    }
+    Value zeroIndex = nullptr;
+    for (int i = 0; i < outRank; ++i) {
+      if (outInDimMap.find(i) != outInDimMap.end()) {
+        outLoopIVs.push_back(inLoopIVs[outInDimMap[i]]);
+      } else {
+        if (zeroIndex) {
+          outLoopIVs.push_back(zeroIndex);
+        } else {
+          zeroIndex = rewriter.create<ConstantIndexOp>(loc, 0);
+          outLoopIVs.push_back(zeroIndex);
+        }
+      }
+    }
+
+    Value next, accumulated;
+    next = rewriter.create<LoadOp>(loc, operands[0], inLoopIVs);
+    accumulated = rewriter.create<LoadOp>(loc, alloc, outLoopIVs);
+    accumulated = mapToLowerScalarOp<ONNXReductionOp>(
+        op, memRefOutType.getElementType(), {accumulated, next}, rewriter);
+    rewriter.create<StoreOp>(loc, accumulated, alloc, outLoopIVs);
+
+    rewriter.replaceOp(op, alloc);
+    return matchSuccess();
   }
 };
 
@@ -1022,7 +1279,8 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXSumOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMaxOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMinOp>,
-                  ONNXReshapeOpLowering, ONNXEntryPointLowering>(&getContext());
+                  ONNXReshapeOpLowering, ONNXEntryPointLowering,
+                  ONNXReductionOpLowering<mlir::ONNXReduceSumOp>>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`
