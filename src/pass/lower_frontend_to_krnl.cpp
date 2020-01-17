@@ -1036,7 +1036,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     /*
-     * Condition: reduction function must be associative and communicative.
+     * Condition: reduction function must be associative and commutative.
      *
      * Example 1 (here, reduction function is `+`):
      * Induction variables: (i0, i1, i2)
