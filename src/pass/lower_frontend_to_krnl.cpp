@@ -133,10 +133,10 @@ static bool checkInsertDealloc(Operation *currentOp) {
 // Create a mapping between an input type's dimensions and a result type's
 // dimensions, given that the result type is the result of a reduction op over
 // the input type.
-std::map<int64_t, int64_t> getReductionMapping(MemRefType inputTy,
-                                               ArrayRef<int64_t> axes,
+std::map<int, int> getReductionMapping(MemRefType inputTy,
+                                               ArrayRef<int> axes,
                                                bool keepdims) {
-  std::map<int64_t, int64_t> OutInDimMap;
+  std::map<int, int> OutInDimMap;
   int64_t rank = inputTy.getRank();
 
   // Mark reduction axes.
@@ -951,18 +951,20 @@ struct ONNXReductionOpLowering : public ConversionPattern {
      * Condition: reduction function must be associative and communicative.
      *
      * Example 1 (here, reduction function is `+`):
-     * Induction variables: (i1,i2,i3)
-     * axes = (0,2)
+     * Induction variables: (i0, i1, i2)
+     * axes = [0, 2]
      * keepdims = true
-     * for i1, i2, i3
-     *   Y(0, i2, 0) += X(i1, i2, i3)
+     * krnl.iterate() with (i0, i1, i2) {
+     *   Y(0, i1, 0) += X(i0, i1, i2)
+     * }
      *
      * Example 2 (here, reduction function is `+`):
-     * Induction variables: (i1,i2,i3)
-     * axes = (0,2)
+     * Induction variables: (i0, i1, i2)
+     * axes = [0, 2]
      * keepdims = false
-     * for i1, i2, i3
-     *   Y(i2) += X(i1, i2, i3)
+     * krnl.iterate() with (i0, i1, i2) {
+     *   Y(i1) += X(i0, i1, i2)
+     * }
      *
     */
     auto loc = op->getLoc();
@@ -973,28 +975,30 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     int64_t outRank = tensorOutType.getRank();
 
     // Get attributes
-    // TODO (tungld): `axes` is a list of ints
-    IntegerAttr axisAttr = op->getAttrOfType<IntegerAttr>("axes");
-    std::vector<int64_t> axes;
-    if (axisAttr) {
-      int64_t axis = axisAttr.getInt();
-      axis = axis >= 0 ? axis : (outRank + axis);
-      assert(axis >= -outRank && axis <= outRank - 1);
-      axes.push_back(axis);
+    auto axisAttrs = op->getAttrOfType<ArrayAttr>("axes");
+    std::vector<int> axes;
+    if (axisAttrs) {
+      for (auto axisAttr : axisAttrs.getValue()) {
+        int axis = axisAttr.cast<IntegerAttr>().getInt();
+        axis = axis >= 0 ? axis : (outRank + axis);
+        assert(axis >= -outRank && axis <= outRank - 1);
+        if (std::find(axes.begin(), axes.end(), axis) == axes.end())
+          axes.push_back(axis);
+      }
     } else {
       for (int i = 0; i < outRank; ++i) {
         axes.push_back(i);
       }
     }
     // KeepDims
-    int64_t keepdimsAttr = op->getAttrOfType<IntegerAttr>("keepdims").getInt();
+    int keepdimsAttr = op->getAttrOfType<IntegerAttr>("keepdims").getInt();
     bool isKeepdims = (keepdimsAttr == 1) ? true : false;
 
     // Get type information
     auto memRefOutType = convertTensorToMemRef(tensorOutType);
     auto memRefOutShape = memRefOutType.getShape();
     auto elementOutType = memRefOutType.getElementType();
-    std::map<int64_t, int64_t> outInDimMap =
+    std::map<int, int> outInDimMap =
         getReductionMapping(memRefInType, axes, isKeepdims);
 
     // Insert an allocation and deallocation for the result of this operation.

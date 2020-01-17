@@ -27,7 +27,7 @@ using namespace mlir::OpTrait::util;
 // Get reduction type
 //===----------------------------------------------------------------------===//
 RankedTensorType getReductionType(RankedTensorType operandTy,
-                                  ArrayRef<int64_t> axes, int64_t keepdims) {
+                                  ArrayRef<int> axes, int keepdims) {
   int64_t rank = operandTy.getRank();
 
   // Mark reduction axes.
@@ -454,16 +454,18 @@ void ONNXReduceSumOp::inferShapes() {
   }
 
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
-  int64_t rank = operandTy.getRank();
+  int rank = operandTy.getRank();
 
-  // TODO (tungld): `axes` is a list of ints
-  IntegerAttr axisAttr = getAttrOfType<IntegerAttr>("axes");
-  std::vector<int64_t> axes;
-  if (axisAttr) {
-    int64_t axis = axisAttr.getInt();
-    axis = axis >= 0 ? axis : (rank + axis);
-    assert(axis >= -rank && axis <= rank - 1);
-    axes.push_back(axis);
+  auto axisAttrs = getAttrOfType<ArrayAttr>("axes");
+  std::vector<int> axes;
+  if (axisAttrs) {
+    for (auto axisAttr : axisAttrs.getValue()) {
+      int axis = axisAttr.cast<IntegerAttr>().getInt();
+      axis = axis >= 0 ? axis : (rank + axis);
+      assert(axis >= -rank && axis <= rank - 1);
+      if (std::find(axes.begin(), axes.end(), axis) == axes.end())
+        axes.push_back(axis);
+    }
   } else {
     for (int i = 0; i < rank; ++i) {
       axes.push_back(i);
@@ -471,7 +473,7 @@ void ONNXReduceSumOp::inferShapes() {
   }
 
   // KeepDims
-  int64_t keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
+  int keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
   bool isKeepdims = (keepdimsAttr == 1) ? true : false;
 
   getResult().setType(getReductionType(operandTy, axes, isKeepdims));
