@@ -717,6 +717,9 @@ Value mapToLowerScalarOp<ONNXReduceMaxOp>(Operation *op,
     auto max = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, lhs, rhs);
     auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
     return result;
+  } else {
+    emitError(loc, "unsupported element type");
+    return nullptr;
   }
 }
 
@@ -740,6 +743,9 @@ Value mapToLowerScalarOp<ONNXReduceMinOp>(Operation *op,
     auto min = rewriter.create<CmpFOp>(loc, CmpFPredicate::OLT, lhs, rhs);
     auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
     return result;
+  } else {
+    emitError(loc, "unsupported element type");
+    return nullptr;
   }
 }
 
