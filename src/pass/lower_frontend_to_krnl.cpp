@@ -367,7 +367,7 @@ float getIdentityValue<float, ONNXReduceMaxOp>(){
 
 template <>
 int getIdentityValue<int, ONNXReduceMaxOp>(){
-  return -std::numeric_limits<int>::infinity();
+  return std::numeric_limits<int>::min();
 }
 
 template <>
@@ -377,7 +377,7 @@ float getIdentityValue<float, ONNXReduceMinOp>(){
 
 template <>
 int getIdentityValue<int, ONNXReduceMinOp>(){
-  return std::numeric_limits<int>::infinity();
+  return std::numeric_limits<int>::max();
 }
 
 template <>
@@ -708,9 +708,16 @@ Value mapToLowerScalarOp<ONNXReduceMaxOp>(Operation *op,
   auto loc = op->getLoc();
   Value lhs = operands[0];
   Value rhs = operands[1];
-  auto max = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, lhs, rhs);
-  auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
-  return result;
+  Type element_type = lhs.getType();
+  if (element_type.isa<IntegerType>()) {
+    auto max = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
+    return result;
+  } else if (element_type.isa<FloatType>()) {
+    auto max = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
+    return result;
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -724,9 +731,16 @@ Value mapToLowerScalarOp<ONNXReduceMinOp>(Operation *op,
   auto loc = op->getLoc();
   Value lhs = operands[0];
   Value rhs = operands[1];
-  auto min = rewriter.create<CmpFOp>(loc, CmpFPredicate::OLT, lhs, rhs);
-  auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
-  return result;
+  Type element_type = lhs.getType();
+  if (element_type.isa<IntegerType>()) {
+    auto min = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
+    return result;
+  } else if (element_type.isa<FloatType>()) {
+    auto min = rewriter.create<CmpFOp>(loc, CmpFPredicate::OLT, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
+    return result;
+  }
 }
 
 // Element-wise unary ops lowering to Krnl dialect.
