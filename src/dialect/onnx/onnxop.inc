@@ -2173,6 +2173,7 @@ def ONNXReduceSumOp:ONNX_Op<"ReduceSum",
 
 def ONNXReduceSumSquareOp:ONNX_Op<"ReduceSumSquare", 
     [NoSideEffect]> {
+  let hasCanonicalizer = 1;
   let summary = "ONNX ReduceSumSquare operation";
   let description = [{
     "Computes the sum square of the input tensor's element along the provided axes. The resulted"
