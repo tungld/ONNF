@@ -926,6 +926,11 @@ struct ONNXGemmOpLowering : public ConversionPattern {
         allocOperands.push_back(dim);
       }
       alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
+      if (insertDealloc) {
+        auto *parentBlock = alloc.getDefiningOp()->getBlock();
+        auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
+        dealloc.getOperation()->moveBefore(&parentBlock->back());
+      }
     }
 
     // Number of loops
