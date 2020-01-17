@@ -283,6 +283,41 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
 
 namespace {
 
+// This is to get a scalar operation of a given type for a specific operation.
+template <typename Op>
+struct ScalarOp {
+  using FOp = void;
+  using IOp = void;
+};
+
+template <typename FOp>
+using ScalarFOp = typename ScalarOp<FOp>::FOp;
+template <typename IOp>
+using ScalarIOp = typename ScalarOp<IOp>::IOp;
+
+//===----------------------------------------------------------------------===//
+// This is used in the innermost loop of a KrnlIterateOp to insert computation
+// composed of one or many scalar ops.
+// Use template specialization for each of different ONNX operations.
+//===----------------------------------------------------------------------===//
+template <typename Op>
+Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
+                         ArrayRef<Value> operands,
+                         ConversionPatternRewriter &rewriter) {
+  auto loc = op->getLoc();
+  Type element_type = operands.front().getType();
+  if (element_type.isa<IntegerType>()) {
+    return rewriter.create<ScalarIOp<Op>>(loc, result_types, operands,
+                                          mlir::None);
+  } else if (element_type.isa<FloatType>()) {
+    return rewriter.create<ScalarFOp<Op>>(loc, result_types, operands,
+                                          mlir::None);
+  } else {
+    emitError(loc, "unsupported element type");
+    return nullptr;
+  }
+}
+
 // We divide the operator lowering into different categories.
 // These categories are mostly similar to the operator categories in ONNX:
 // https://github.com/onnx/onnx/tree/master/onnx/defs.

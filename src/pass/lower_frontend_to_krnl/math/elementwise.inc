@@ -8,9 +8,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-template <typename ElementwiseNaryOp>
-struct ScalarOp;
-
 template <>
 struct ScalarOp<ONNXAndOp> {
   using FOp = AndOp; // not use
@@ -82,34 +79,6 @@ struct ScalarOp<ONNXTanhOp> {
   using FOp = TanhOp;
   using IOp = TanhOp; // not use
 };
-
-template <typename ElementwiseNaryOp>
-using ScalarFOp = typename ScalarOp<ElementwiseNaryOp>::FOp;
-template <typename ElementwiseNaryOp>
-using ScalarIOp = typename ScalarOp<ElementwiseNaryOp>::IOp;
-
-//===----------------------------------------------------------------------===//
-// Scalar unary ops for lowering to Krnl dialect.
-//===----------------------------------------------------------------------===//
-template <typename UnaryOp>
-Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
-                         ArrayRef<Value> operands,
-                         ConversionPatternRewriter &rewriter) {
-  /* Lower UnaryOp to Ops in the Standard dialect.
-   */
-  auto loc = op->getLoc();
-  Type element_type = operands.front().getType();
-  if (element_type.isa<IntegerType>()) {
-    return rewriter.create<ScalarIOp<UnaryOp>>(loc, result_types, operands,
-                                               mlir::None);
-  } else if (element_type.isa<FloatType>()) {
-    return rewriter.create<ScalarFOp<UnaryOp>>(loc, result_types, operands,
-                                               mlir::None);
-  } else {
-    emitError(loc, "unsupported element type");
-    return nullptr;
-  }
-}
 
 //===----------------------------------------------------------------------===//
 // Scalar unary ops for lowering ONNXCoshOp
