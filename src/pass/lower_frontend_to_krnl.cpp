@@ -130,6 +130,58 @@ static bool checkInsertDealloc(Operation *currentOp) {
   return insertDealloc;
 }
 
+// Insert KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
+// iterating along the given MemRefType dimensions. If a dimension is unknown,
+// get its value of the same index from the given operand.
+// There is no optimization in the KrnlOptimizeLoopsOp.
+KrnlIterateOp createKrnlIterateOp(Location loc, PatternRewriter &rewriter,
+                                  MemRefType memRefType, Value operand) {
+  KrnlIterateOp iterateOp;
+  // Number of loops
+  auto memRefShape = memRefType.getShape();
+  int64_t rank = memRefShape.size();
+
+  // Define loops.
+  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
+  std::vector<Value> originalLoops;
+  originalLoops.reserve(rank);
+  for (auto result : loopsOp.getResults()) {
+    originalLoops.push_back(result);
+  }
+
+  // Define loop optimization.
+  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
+  std::vector<Value> optimizedLoops;
+  optimizedLoops.reserve(rank);
+  for (auto result : optimizedLoopsOp.getResults()) {
+    optimizedLoops.push_back(result);
+  }
+  Block &optimizationBlock = optimizedLoopsOp.region().front();
+
+  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+  for (int i = 0; i < rank; ++i) {
+    if (memRefShape[i] < 0) {
+      pack.pushConstantBound(0);
+      pack.pushOperandBound(
+          rewriter.create<DimOp>(loc, operand, i).getResult());
+    } else {
+      pack.pushConstantBound(0);
+      pack.pushConstantBound(memRefShape[i]);
+    }
+  }
+
+  iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+
+  // Insert any optimizations in the KrnlOptimizeLoopsOp body.
+  rewriter.setInsertionPointToEnd(&optimizationBlock);
+  // Return from KrnlOptimizeLoopsOp body.
+  // When no optimizations are present we just return the loops unchaged.
+  rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+  rewriter.setInsertionPointAfter(iterateOp);
+
+  return iterateOp;
+}
+
 unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
   auto elementType = memRefType.getElementType();
 
@@ -227,57 +279,7 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
-// Create an Krnl iterate that iterates over the given MemRefType dimensions.
-// If a dimension is unknown, get its value of the same index from the given
-// operand.
-// There is no optimization for the Krnl iterate.
-KrnlIterateOp createKrnlIterateOp(Location loc, PatternRewriter &rewriter,
-                                  MemRefType memRefType, Value operand) {
-  KrnlIterateOp iterateOp;
-  // Number of loops
-  auto memRefShape = memRefType.getShape();
-  int64_t rank = memRefShape.size();
 
-  // Define loops.
-  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
-  std::vector<Value> originalLoops;
-  originalLoops.reserve(rank);
-  for (auto result : loopsOp.getResults()) {
-    originalLoops.push_back(result);
-  }
-
-  // Define loop optimization.
-  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
-  std::vector<Value> optimizedLoops;
-  optimizedLoops.reserve(rank);
-  for (auto result : optimizedLoopsOp.getResults()) {
-    optimizedLoops.push_back(result);
-  }
-  Block &optimizationBlock = optimizedLoopsOp.region().front();
-
-  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-  for (int i = 0; i < rank; ++i) {
-    if (memRefShape[i] < 0) {
-      pack.pushConstantBound(0);
-      pack.pushOperandBound(
-          rewriter.create<DimOp>(loc, operand, i).getResult());
-    } else {
-      pack.pushConstantBound(0);
-      pack.pushConstantBound(memRefShape[i]);
-    }
-  }
-
-  iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
-
-  // Insert any optimizations in the KrnlOptimizeLoopsOp body.
-  rewriter.setInsertionPointToEnd(&optimizationBlock);
-  // Return from KrnlOptimizeLoopsOp body.
-  // When no optimizations are present we just return the loops unchaged.
-  rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
-  rewriter.setInsertionPointAfter(iterateOp);
-
-  return iterateOp;
-}
 
 namespace {
 
