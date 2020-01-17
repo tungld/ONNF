@@ -117,6 +117,9 @@ public:
         op->getName().getStringRef() != "onnx.GemmNoBias" &&
         op->getName().getStringRef() != "onnx.Reshape" &&
         op->getName().getStringRef() != "onnx.Transpose" &&
+        op->getName().getStringRef() != "onnx.ReduceMax" &&
+        op->getName().getStringRef() != "onnx.ReduceMin" &&
+        op->getName().getStringRef() != "onnx.ReduceProd" &&
         op->getName().getStringRef() != "onnx.ReduceSum")
       return false;
     return llvm::any_of(op->getResultTypes(), [](Type result_type) {

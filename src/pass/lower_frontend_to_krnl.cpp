@@ -337,6 +337,12 @@ struct ScalarOp<ONNXLogOp> {
 };
 
 template <>
+struct ScalarOp<ONNXReduceProdOp> {
+  using FOp = MulFOp;
+  using IOp = MulIOp;
+};
+
+template <>
 struct ScalarOp<ONNXReduceSumOp> {
   using FOp = AddFOp;
   using IOp = AddIOp;
@@ -352,6 +358,36 @@ using ScalarIOp = typename ScalarOp<ElementwiseNaryOp>::IOp;
 template <typename DataType, typename Op>
 DataType getIdentityValue() {
   return NULL;
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceMaxOp>(){
+  return (float)-std::numeric_limits<float>::infinity();
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceMaxOp>(){
+  return -std::numeric_limits<int>::infinity();
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceMinOp>(){
+  return (float)std::numeric_limits<float>::infinity();
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceMinOp>(){
+  return std::numeric_limits<int>::infinity();
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceProdOp>(){
+  return (float)1.0;
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceProdOp>(){
+  return 1;
 }
 
 template <>
@@ -653,6 +689,38 @@ Value mapToLowerScalarOp<ONNXMinOp>(Operation *op, ArrayRef<Type> result_types,
   // ONNXMinOp(%X, %Y) = SelectOp(CmpFOp(OLT, %X, %Y),
   //                              %X,
   //                              %Y)
+  auto loc = op->getLoc();
+  Value lhs = operands[0];
+  Value rhs = operands[1];
+  auto min = rewriter.create<CmpFOp>(loc, CmpFPredicate::OLT, lhs, rhs);
+  auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
+  return result;
+}
+
+//===----------------------------------------------------------------------===//
+// Scalar unary ops for lowering ONNXReduceMaxOp
+//===----------------------------------------------------------------------===//
+template <>
+Value mapToLowerScalarOp<ONNXReduceMaxOp>(Operation *op,
+                                          ArrayRef<Type> result_types,
+                                          ArrayRef<Value> operands,
+                                          ConversionPatternRewriter &rewriter) {
+  auto loc = op->getLoc();
+  Value lhs = operands[0];
+  Value rhs = operands[1];
+  auto max = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, lhs, rhs);
+  auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
+  return result;
+}
+
+//===----------------------------------------------------------------------===//
+// Scalar unary ops for lowering ONNXReduceMinOp
+//===----------------------------------------------------------------------===//
+template <>
+Value mapToLowerScalarOp<ONNXReduceMinOp>(Operation *op,
+                                          ArrayRef<Type> result_types,
+                                          ArrayRef<Value> operands,
+                                          ConversionPatternRewriter &rewriter) {
   auto loc = op->getLoc();
   Value lhs = operands[0];
   Value rhs = operands[1];
@@ -1284,6 +1352,9 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMaxOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMinOp>,
                   ONNXReshapeOpLowering, ONNXEntryPointLowering,
+                  ONNXReductionOpLowering<mlir::ONNXReduceMaxOp>,
+                  ONNXReductionOpLowering<mlir::ONNXReduceMinOp>,
+                  ONNXReductionOpLowering<mlir::ONNXReduceProdOp>,
                   ONNXReductionOpLowering<mlir::ONNXReduceSumOp>>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the

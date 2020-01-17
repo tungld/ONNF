@@ -2097,7 +2097,7 @@ def ONNXReduceLogSumExpOp:ONNX_Op<"ReduceLogSumExp",
 }
 
 def ONNXReduceMaxOp:ONNX_Op<"ReduceMax", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX ReduceMax operation";
   let description = [{
     "Computes the max of the input tensor's element along the provided axes. The resulted"
@@ -2127,7 +2127,7 @@ def ONNXReduceMeanOp:ONNX_Op<"ReduceMean",
 }
 
 def ONNXReduceMinOp:ONNX_Op<"ReduceMin", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX ReduceMin operation";
   let description = [{
     "Computes the min of the input tensor's element along the provided axes. The resulted"
@@ -2142,7 +2142,7 @@ def ONNXReduceMinOp:ONNX_Op<"ReduceMin",
 }
 
 def ONNXReduceProdOp:ONNX_Op<"ReduceProd", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX ReduceProd operation";
   let description = [{
     "Computes the product of the input tensor's element along the provided axes. The resulted"
