@@ -21,56 +21,65 @@ namespace {
 /// Include the patterns defined in the Declarative Rewrite framework.
 #include "src/onnx_combine.inc"
 
+// Due to a limitation of ODS that "all ODS-generated `build()` methods require
+// specifying the result type(s), unless the op has known traits like
+// `SameOperandsAndResultType` that we can use to auto-generate a `build()`
+// method with result type deduction", we will to write some patterns manually
+// until we find a better way.
+//
+// More information about the limitation can be found here:
+// https://github.com/llvm/llvm-project/blob/master/mlir/docs/DeclarativeRewrites.md#building-operations
+//
+
+//===----------------------------------------------------------------------===//
 // ONNXReduceSumSquareOp %X = ONNXReduceSumOp (ONNXMulOp %X, %X)
+//===----------------------------------------------------------------------===//
 struct ReduceSumSquareOpPattern : public RewritePattern {
   ReduceSumSquareOpPattern(MLIRContext *context)
       : RewritePattern("onnx.ReduceSumSquare", {"onnx.Mul", "onnx.ReduceSum"},
                        1, context) {}
 
-  PatternMatchResult matchAndRewrite(Operation *op0,
+  PatternMatchResult matchAndRewrite(Operation *op,
                                      PatternRewriter &rewriter) const override {
     // Variables for capturing values and attributes used for creating ops
-    Operation::operand_range X(op0->getOperands());
-    Operation *ops[1];
+    Operation::operand_range X(op->getOperands());
 
     // Match
-    ops[0] = op0;
-    auto sumSquareOp = dyn_cast_or_null<ONNXReduceSumSquareOp>(op0);
-    X = sumSquareOp.getODSOperands(0);
+    auto opODS = dyn_cast_or_null<ONNXReduceSumSquareOp>(op);
+    auto opODS_X = opODS.getODSOperands(0);
+    auto opODS_Y = opODS.getODSResults(0);
+    auto opODS_Attrs = opODS.getAttrs();
 
     // Rewrite
-    auto loc = rewriter.getFusedLoc({ops[0]->getLoc()});
+    auto loc = op->getLoc();
     ONNXMulOp mulOp;
     {
-      Value A = (*X.begin());
-      Value B = (*X.begin());
-      SmallVector<Type, 4> outTypes;
-      for (auto v : sumSquareOp.getODSResults(0)) {
-        outTypes.push_back(v->getType());
-      }
-      mulOp = rewriter.create<ONNXMulOp>(loc, outTypes, A, B);
+      Value X = (*opODS_X.begin());
+      auto elementType = X->getType().cast<TensorType>().getElementType();
+      mulOp = rewriter.create<ONNXMulOp>(
+          loc, UnrankedTensorType::get(elementType), X, X);
     }
 
     ONNXReduceSumOp sumOp;
     {
       SmallVector<Value, 4> values;
       SmallVector<NamedAttribute, 4> attrs;
-      SmallVector<Type, 4> outTypes;
+      SmallVector<Type, 4> types;
       values.push_back((*mulOp.getODSResults(0).begin()));
-      for (auto attr : sumSquareOp.getAttrs()) {
+      for (auto attr : opODS_Attrs) {
         attrs.push_back(attr);
       }
-      for (auto v : sumSquareOp.getODSResults(0)) {
-        outTypes.push_back(v->getType());
+      for (auto v : opODS_Y) {
+        types.push_back(v->getType());
       }
-      sumOp = rewriter.create<ONNXReduceSumOp>(loc, outTypes, values, attrs);
+      sumOp = rewriter.create<ONNXReduceSumOp>(loc, types, values, attrs);
     }
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{sumOp.getODSResults(0)}) {
       values.push_back(v);
     }
-    rewriter.replaceOp(op0, values);
+    rewriter.replaceOp(op, values);
     return matchSuccess();
   };
 };
