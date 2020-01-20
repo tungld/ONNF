@@ -29,7 +29,7 @@ namespace {
 //
 
 //===----------------------------------------------------------------------===//
-// ONNXReduceL1Op %X = ONNXReduceSumOp (ONNXAbsOp %X, %X)
+// ONNXReduceL1Op %X = ONNXReduceSumOp (ONNXAbsOp %X)
 //===----------------------------------------------------------------------===//
 struct ReduceL1OpPattern : public RewritePattern {
   ReduceL1OpPattern(MLIRContext *context)
