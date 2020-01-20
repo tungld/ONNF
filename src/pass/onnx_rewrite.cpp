@@ -29,10 +29,63 @@ namespace {
 //
 
 //===----------------------------------------------------------------------===//
+// ONNXReduceL1Op %X = ONNXReduceSumOp (ONNXAbsOp %X, %X)
+//===----------------------------------------------------------------------===//
+struct ReduceL1OpPattern : public RewritePattern {
+  ReduceL1OpPattern(MLIRContext *context)
+      : RewritePattern("onnx.ReduceL1", {"onnx.Abs", "onnx.ReduceSum"}, 1,
+                       context) {}
+
+  PatternMatchResult matchAndRewrite(Operation *op,
+                                     PatternRewriter &rewriter) const override {
+    // Variables for capturing values and attributes used for creating ops
+    Operation::operand_range X(op->getOperands());
+
+    // Match
+    auto opODS = dyn_cast_or_null<ONNXReduceL1Op>(op);
+    auto opODS_X = opODS.getODSOperands(0);
+    auto opODS_Y = opODS.getODSResults(0);
+    auto opODS_Attrs = opODS.getAttrs();
+
+    // Rewrite
+    auto loc = op->getLoc();
+    ONNXAbsOp absOp;
+    {
+      Value X = (*opODS_X.begin());
+      auto elementType = X->getType().cast<TensorType>().getElementType();
+      absOp = rewriter.create<ONNXAbsOp>(
+          loc, UnrankedTensorType::get(elementType), X);
+    }
+
+    ONNXReduceSumOp sumOp;
+    {
+      SmallVector<Value, 4> values;
+      SmallVector<NamedAttribute, 4> attrs;
+      SmallVector<Type, 4> types;
+      values.push_back((*absOp.getODSResults(0).begin()));
+      for (auto attr : opODS_Attrs) {
+        attrs.push_back(attr);
+      }
+      for (auto v : opODS_Y) {
+        types.push_back(v->getType());
+      }
+      sumOp = rewriter.create<ONNXReduceSumOp>(loc, types, values, attrs);
+    }
+
+    SmallVector<Value, 4> values;
+    for (auto v : SmallVector<Value, 4>{sumOp.getODSResults(0)}) {
+      values.push_back(v);
+    }
+    rewriter.replaceOp(op, values);
+    return matchSuccess();
+  };
+};
+
+//===----------------------------------------------------------------------===//
 // ONNXReduceL2Op %X = ONNXSqrtOp (ONNXReduceSumSquareOp (%X))
 //===----------------------------------------------------------------------===//
-struct ReduceL2Pattern : public RewritePattern {
-  ReduceL2Pattern(MLIRContext *context)
+struct ReduceL2OpPattern : public RewritePattern {
+  ReduceL2OpPattern(MLIRContext *context)
       : RewritePattern("onnx.ReduceL2", {"onnx.Sqrt", "onnx.ReduceSumSquare"},
                        1, context) {}
 
@@ -69,6 +122,107 @@ struct ReduceL2Pattern : public RewritePattern {
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{sqrtOp.getODSResults(0)}) {
+      values.push_back(v);
+    }
+    rewriter.replaceOp(op, values);
+    return matchSuccess();
+  };
+};
+
+//===----------------------------------------------------------------------===//
+// ONNXReduceLogSumOp %X = ONNXLogOp (ONNXReduceSumOp (%X))
+//===----------------------------------------------------------------------===//
+struct ReduceLogSumOpPattern : public RewritePattern {
+  ReduceLogSumOpPattern(MLIRContext *context)
+      : RewritePattern("onnx.ReduceLogSum", {"onnx.ReduceSum", "onnx.Log"}, 1,
+                       context) {}
+
+  PatternMatchResult matchAndRewrite(Operation *op,
+                                     PatternRewriter &rewriter) const override {
+    // Variables for capturing values and attributes used for creating ops
+    Operation::operand_range X(op->getOperands());
+
+    // Match
+    auto opODS = dyn_cast_or_null<ONNXReduceLogSumOp>(op);
+    auto opODS_X = opODS.getODSOperands(0);
+    auto opODS_Y = opODS.getODSResults(0);
+    auto opODS_Attrs = opODS.getAttrs();
+
+    // Rewrite
+    auto loc = op->getLoc();
+    ONNXReduceSumOp sumOp;
+    {
+      Value X = (*opODS_X.begin());
+      auto elementType = X->getType().cast<TensorType>().getElementType();
+      sumOp = rewriter.create<ONNXReduceSumOp>(
+          loc, UnrankedTensorType::get(elementType), X, opODS_Attrs);
+    }
+
+    ONNXLogOp logOp;
+    {
+      SmallVector<Type, 4> types;
+      for (auto v : opODS_Y) {
+        types.push_back(v->getType());
+      }
+      logOp = rewriter.create<ONNXLogOp>(loc, types,
+                                         (*sumOp.getODSResults(0).begin()));
+    }
+
+    SmallVector<Value, 4> values;
+    for (auto v : SmallVector<Value, 4>{logOp.getODSResults(0)}) {
+      values.push_back(v);
+    }
+    rewriter.replaceOp(op, values);
+    return matchSuccess();
+  };
+};
+
+//===----------------------------------------------------------------------===//
+// ONNXReduceLogSumExpOp %X = ONNXReduceLogSumOp (ONNXExpOp %X)
+//===----------------------------------------------------------------------===//
+struct ReduceLogSumExpOpPattern : public RewritePattern {
+  ReduceLogSumExpOpPattern(MLIRContext *context)
+      : RewritePattern("onnx.ReduceLogSumExp",
+                       {"onnx.Exp", "onnx.ReduceLogSum"}, 1, context) {}
+
+  PatternMatchResult matchAndRewrite(Operation *op,
+                                     PatternRewriter &rewriter) const override {
+    // Variables for capturing values and attributes used for creating ops
+    Operation::operand_range X(op->getOperands());
+
+    // Match
+    auto opODS = dyn_cast_or_null<ONNXReduceLogSumExpOp>(op);
+    auto opODS_X = opODS.getODSOperands(0);
+    auto opODS_Y = opODS.getODSResults(0);
+    auto opODS_Attrs = opODS.getAttrs();
+
+    // Rewrite
+    auto loc = op->getLoc();
+    ONNXExpOp expOp;
+    {
+      Value X = (*opODS_X.begin());
+      auto elementType = X->getType().cast<TensorType>().getElementType();
+      expOp = rewriter.create<ONNXExpOp>(
+          loc, UnrankedTensorType::get(elementType), X);
+    }
+
+    ONNXReduceLogSumOp logSumOp;
+    {
+      SmallVector<Value, 4> values;
+      SmallVector<NamedAttribute, 4> attrs;
+      SmallVector<Type, 4> types;
+      values.push_back((*expOp.getODSResults(0).begin()));
+      for (auto attr : opODS_Attrs) {
+        attrs.push_back(attr);
+      }
+      for (auto v : opODS_Y) {
+        types.push_back(v->getType());
+      }
+      logSumOp = rewriter.create<ONNXReduceLogSumOp>(loc, types, values, attrs);
+    }
+
+    SmallVector<Value, 4> values;
+    for (auto v : SmallVector<Value, 4>{logSumOp.getODSResults(0)}) {
       values.push_back(v);
     }
     rewriter.replaceOp(op, values);
@@ -128,17 +282,33 @@ struct ReduceSumSquareOpPattern : public RewritePattern {
     return matchSuccess();
   };
 };
-}  // end anonymous namespace
+} // end anonymous namespace
 
+/// on the ONNXReduceL1Op.
+void ONNXReduceL1Op::getCanonicalizationPatterns(
+    OwningRewritePatternList &results, MLIRContext *context) {
+  results.insert<ReduceL1OpPattern>(context);
+}
+/// on the ONNXReduceL2Op.
+void ONNXReduceL2Op::getCanonicalizationPatterns(
+    OwningRewritePatternList &results, MLIRContext *context) {
+  results.insert<ReduceL2OpPattern>(context);
+}
+
+/// on the ONNXReduceLogSumOp.
+void ONNXReduceLogSumOp::getCanonicalizationPatterns(
+    OwningRewritePatternList &results, MLIRContext *context) {
+  results.insert<ReduceLogSumOpPattern>(context);
+}
+
+/// on the ONNXReduceLogSumExpOp.
+void ONNXReduceLogSumExpOp::getCanonicalizationPatterns(
+    OwningRewritePatternList &results, MLIRContext *context) {
+  results.insert<ReduceLogSumExpOpPattern>(context);
+}
 
 /// on the ONNXReduceSumSquareOp.
 void ONNXReduceSumSquareOp::getCanonicalizationPatterns(
-    OwningRewritePatternList& results, MLIRContext* context) {
+    OwningRewritePatternList &results, MLIRContext *context) {
   results.insert<ReduceSumSquareOpPattern>(context);
-}
-
-/// on the ONNXReduceL2Op.
-void ONNXReduceL2Op::getCanonicalizationPatterns(
-    OwningRewritePatternList& results, MLIRContext* context) {
-  results.insert<ReduceL2Pattern>(context);
 }

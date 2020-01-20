@@ -2038,6 +2038,7 @@ def ONNXReciprocalOp:ONNX_Op<"Reciprocal",
 
 def ONNXReduceL1Op:ONNX_Op<"ReduceL1", 
     [NoSideEffect]> {
+  let hasCanonicalizer = 1;
   let summary = "ONNX ReduceL1 operation";
   let description = [{
     "Computes the L1 norm of the input tensor's element along the provided axes. The resulted"
@@ -2069,6 +2070,7 @@ def ONNXReduceL2Op:ONNX_Op<"ReduceL2",
 
 def ONNXReduceLogSumOp:ONNX_Op<"ReduceLogSum", 
     [NoSideEffect]> {
+  let hasCanonicalizer = 1;
   let summary = "ONNX ReduceLogSum operation";
   let description = [{
     "Computes the log sum of the input tensor's element along the provided axes. The resulted"
@@ -2084,6 +2086,7 @@ def ONNXReduceLogSumOp:ONNX_Op<"ReduceLogSum",
 
 def ONNXReduceLogSumExpOp:ONNX_Op<"ReduceLogSumExp", 
     [NoSideEffect]> {
+  let hasCanonicalizer = 1;
   let summary = "ONNX ReduceLogSumExp operation";
   let description = [{
     "Computes the log sum exponent of the input tensor's element along the provided axes. The resulted"

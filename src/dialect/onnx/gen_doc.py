@@ -268,7 +268,8 @@ def gen_schema(schema) :
                         'Sum', 'Max', 'Min', 'MatMul', 'Gemm', 'LeakyRelu',
                         'Elu', 'Selu', 'HardSigmoid', 'Reshape', 'Reciprocal',
                         'Identity', 'Cos', 'Log', 'Transpose']
-    CanonicalList=['Add', 'Identity', 'ReduceSumSquare', 'ReduceL2']
+    CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
+                   'ReduceLogSumExp', 'ReduceSumSquare']
     line_indent = '  '
 
     #s = 'def ONNX'+schema.name+str(schema.since_version)+'Op:ONNX_Op<"'+schema.name+'", \n'
