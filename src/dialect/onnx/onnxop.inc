@@ -2053,6 +2053,7 @@ def ONNXReduceL1Op:ONNX_Op<"ReduceL1",
 
 def ONNXReduceL2Op:ONNX_Op<"ReduceL2", 
     [NoSideEffect]> {
+  let hasCanonicalizer = 1;
   let summary = "ONNX ReduceL2 operation";
   let description = [{
     "Computes the L2 norm of the input tensor's element along the provided axes. The resulted"
