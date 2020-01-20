@@ -52,7 +52,7 @@ struct ReduceL1OpPattern : public RewritePattern {
     ONNXAbsOp absOp;
     {
       Value X = (*opODS_X.begin());
-      auto elementType = X->getType().cast<TensorType>().getElementType();
+      auto elementType = X.getType().cast<TensorType>().getElementType();
       absOp = rewriter.create<ONNXAbsOp>(
           loc, UnrankedTensorType::get(elementType), X);
     }
@@ -67,7 +67,7 @@ struct ReduceL1OpPattern : public RewritePattern {
         attrs.push_back(attr);
       }
       for (auto v : opODS_Y) {
-        types.push_back(v->getType());
+        types.push_back(v.getType());
       }
       sumOp = rewriter.create<ONNXReduceSumOp>(loc, types, values, attrs);
     }
@@ -105,7 +105,7 @@ struct ReduceL2OpPattern : public RewritePattern {
     ONNXReduceSumSquareOp sumSquareOp;
     {
       Value X = (*opODS_X.begin());
-      auto elementType = X->getType().cast<TensorType>().getElementType();
+      auto elementType = X.getType().cast<TensorType>().getElementType();
       sumSquareOp = rewriter.create<ONNXReduceSumSquareOp>(
           loc, UnrankedTensorType::get(elementType), X, opODS_Attrs);
     }
@@ -114,7 +114,7 @@ struct ReduceL2OpPattern : public RewritePattern {
     {
       SmallVector<Type, 4> types;
       for (auto v : opODS_Y) {
-        types.push_back(v->getType());
+        types.push_back(v.getType());
       }
       sqrtOp = rewriter.create<ONNXSqrtOp>(
           loc, types, (*sumSquareOp.getODSResults(0).begin()));
@@ -153,7 +153,7 @@ struct ReduceLogSumOpPattern : public RewritePattern {
     ONNXReduceSumOp sumOp;
     {
       Value X = (*opODS_X.begin());
-      auto elementType = X->getType().cast<TensorType>().getElementType();
+      auto elementType = X.getType().cast<TensorType>().getElementType();
       sumOp = rewriter.create<ONNXReduceSumOp>(
           loc, UnrankedTensorType::get(elementType), X, opODS_Attrs);
     }
@@ -162,7 +162,7 @@ struct ReduceLogSumOpPattern : public RewritePattern {
     {
       SmallVector<Type, 4> types;
       for (auto v : opODS_Y) {
-        types.push_back(v->getType());
+        types.push_back(v.getType());
       }
       logOp = rewriter.create<ONNXLogOp>(loc, types,
                                          (*sumOp.getODSResults(0).begin()));
@@ -201,7 +201,7 @@ struct ReduceLogSumExpOpPattern : public RewritePattern {
     ONNXExpOp expOp;
     {
       Value X = (*opODS_X.begin());
-      auto elementType = X->getType().cast<TensorType>().getElementType();
+      auto elementType = X.getType().cast<TensorType>().getElementType();
       expOp = rewriter.create<ONNXExpOp>(
           loc, UnrankedTensorType::get(elementType), X);
     }
@@ -216,7 +216,7 @@ struct ReduceLogSumExpOpPattern : public RewritePattern {
         attrs.push_back(attr);
       }
       for (auto v : opODS_Y) {
-        types.push_back(v->getType());
+        types.push_back(v.getType());
       }
       logSumOp = rewriter.create<ONNXReduceLogSumOp>(loc, types, values, attrs);
     }
@@ -254,7 +254,7 @@ struct ReduceSumSquareOpPattern : public RewritePattern {
     ONNXMulOp mulOp;
     {
       Value X = (*opODS_X.begin());
-      auto elementType = X->getType().cast<TensorType>().getElementType();
+      auto elementType = X.getType().cast<TensorType>().getElementType();
       mulOp = rewriter.create<ONNXMulOp>(
           loc, UnrankedTensorType::get(elementType), X, X);
     }
@@ -269,7 +269,7 @@ struct ReduceSumSquareOpPattern : public RewritePattern {
         attrs.push_back(attr);
       }
       for (auto v : opODS_Y) {
-        types.push_back(v->getType());
+        types.push_back(v.getType());
       }
       sumOp = rewriter.create<ONNXReduceSumOp>(loc, types, values, attrs);
     }
