@@ -166,21 +166,26 @@ private:
     std::vector<int64_t> dims;
     auto shape_proto = input.type().tensor_type().shape();
     auto input_tensor_legalized_name = legalize_name(input.name());
-    for (int i = 0; i < shape_proto.dim_size(); i++) {
-      if (shape_proto.dim()[i].dim_value()) {
-        int dim_numeric_size = shape_proto.dim()[i].dim_value();
-        assert(
-            dim_numeric_size != 0 && "Parsed an input tensor with a dimension size of zero");
-        if (dim_numeric_size > 0) {
-          dims.push_back(dim_numeric_size);
-        } else { // If dim_value < 0, then dim is parametric.
-                 // TODO Verify the unknown dim size in MLIR
+    if (shape_proto.dim_size() > 0) {
+      for (int i = 0; i < shape_proto.dim_size(); i++) {
+        if (shape_proto.dim()[i].dim_value()) {
+          int dim_numeric_size = shape_proto.dim()[i].dim_value();
+          assert(dim_numeric_size != 0 &&
+                 "Parsed an input tensor with a dimension size of zero");
+          if (dim_numeric_size > 0) {
+            dims.push_back(dim_numeric_size);
+          } else { // If dim_value < 0, then dim is parametric.
+                   // TODO Verify the unknown dim size in MLIR
+            dims.push_back(-1);
+          }
+        } else {
+          // TODO How to represent variable length
           dims.push_back(-1);
         }
-      } else {
-        // TODO How to represent variable length
-        dims.push_back(-1);
       }
+    } else {
+      // scalar input, e.g. ```python x = np.array(3.14).astype(np.float32)```
+      dims.push_back(1);
     }
 
     mlir::Type elementType =
