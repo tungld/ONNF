@@ -1039,19 +1039,25 @@ struct ONNXGemmOpLowering : public ConversionPattern {
       loopMNIVs.push_back(arg);
     }
 
-    // Compute alpha*A*B
+    // Initialize the output of A*B
+    auto zero = rewriter.create<ConstantOp>(
+        loc, FloatAttr::get(memRefType.getElementType(), 0));
+    rewriter.create<StoreOp>(loc, zero, alloc, loopMNIVs);
+
+    // Compute A*B
     auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, reductionPack);
 
     // Compute beta*C, and add up to alpha*A*B (unidirectional broadcasting)
     auto loopCIVs = getLoopIVsForBroadcasting(
         loc, rewriter, loopMNIVs, C, broadcastedDimInfo);
     auto loadedC = rewriter.create<LoadOp>(loc, C, loopCIVs);
-    auto loadedAlphaAB = rewriter.create<LoadOp>(loc, alloc, loopMNIVs);
+    auto loadedAB = rewriter.create<LoadOp>(loc, alloc, loopMNIVs);
+    auto alphaAB = rewriter.create<MulFOp>(loc, alpha, loadedAB);
     auto betaC = rewriter.create<MulFOp>(loc, beta, loadedC);
-    auto Y = rewriter.create<AddFOp>(loc, loadedAlphaAB, betaC);
+    auto Y = rewriter.create<AddFOp>(loc, alphaAB, betaC);
     rewriter.create<StoreOp>(loc, Y, alloc, loopMNIVs);
 
-    // Insert instructions to do matrix multiplication: alpha*A*B
+    // Insert instructions to do matrix multiplication: A*B
     Block &matmulIterationBlock = matmulIterateOp.bodyRegion().front();
     rewriter.setInsertionPointToStart(&matmulIterationBlock);
 
@@ -1079,8 +1085,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     auto loadedB = rewriter.create<LoadOp>(loc, B, loopBIVs);
     auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopMNIVs);
     auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
-    auto alphaAB = rewriter.create<MulFOp>(loc, alpha, AB);
-    auto accumulated = rewriter.create<AddFOp>(loc, loadedY, alphaAB);
+    auto accumulated = rewriter.create<AddFOp>(loc, loadedY, AB);
     rewriter.create<StoreOp>(loc, accumulated, alloc, loopMNIVs);
 
     rewriter.replaceOp(op, alloc);
