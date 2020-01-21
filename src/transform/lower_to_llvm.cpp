@@ -468,7 +468,7 @@ public:
                   ConversionPatternRewriter &rewriter) const override {
     OperandAdaptor<KrnlSqrtOp> adaptor(operands);
     LLVM::LLVMType operandType =
-        adaptor.operand()->getType().dyn_cast_or_null<LLVM::LLVMType>();
+        adaptor.operand().getType().dyn_cast_or_null<LLVM::LLVMType>();
 
     if (!operandType)
       return matchFailure();
