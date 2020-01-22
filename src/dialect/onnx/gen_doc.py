@@ -369,7 +369,7 @@ def gen_code(schema,fefile) :
         #("Transpose", "ImportNodeTranspose")
         ])
     list_str = 'std::vector'
-    empty_ints = list_str+'<int> {}' 
+    empty_ints = list_str+'<int64_t> {}'
     empty_floats = list_str+'<float> {}' 
     special_default = dict([
         ("AveragePool "+"kernel_shape", empty_ints),
@@ -430,7 +430,7 @@ def gen_code(schema,fefile) :
                         attr_type_str = list_str+'<float>'
                         attr_option_str = attr_option_str.replace("'", '')
                     elif isinstance(value, int) :
-                        attr_type_str = list_str+'<int>'
+                        attr_type_str = list_str+'<int64_t>'
                         attr_option_str = attr_option_str.replace("'", '')
                     elif isinstance(value, str) :
                         attr_type_str = list_str+'<std::string>'

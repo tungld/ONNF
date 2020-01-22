@@ -18,11 +18,13 @@
        ImportNodeOneOut<mlir::ONNXArgMaxOp>(node, 1, 1, {
          {"axis", 0}
         ,{"keepdims", 1}
+        ,{"select_last_index", 0}
       });
     }else if (OpName == "ArgMin") {
        ImportNodeOneOut<mlir::ONNXArgMinOp>(node, 1, 1, {
          {"axis", 0}
         ,{"keepdims", 1}
+        ,{"select_last_index", 0}
       });
     }else if (OpName == "Asin") {
        ImportNodeOneOut<mlir::ONNXAsinOp>(node, 1, 1, {
