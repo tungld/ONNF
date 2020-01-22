@@ -121,6 +121,46 @@ test_to_enable = [
     # Relu Op:
     "test_relu_cpu",
 
+    # ReduceMax Op:
+    "test_reduce_max_default_axes_keepdim_example_cpu",
+    "test_reduce_max_default_axes_keepdims_random_cpu",
+    "test_reduce_max_do_not_keepdims_example_cpu",
+    "test_reduce_max_do_not_keepdims_random_cpu",
+    "test_reduce_max_keepdims_example_cpu",
+    "test_reduce_max_keepdims_random_cpu",
+    "test_reduce_max_negative_axes_keepdims_example_cpu",
+    "test_reduce_max_negative_axes_keepdims_random_cpu",
+
+    # ReduceMin Op:
+    "test_reduce_min_default_axes_keepdims_example_cpu",
+    "test_reduce_min_default_axes_keepdims_random_cpu",
+    "test_reduce_min_do_not_keepdims_example_cpu",
+    "test_reduce_min_do_not_keepdims_random_cpu",
+    "test_reduce_min_keepdims_example_cpu",
+    "test_reduce_min_keepdims_random_cpu",
+    "test_reduce_min_negative_axes_keepdims_example_cpu",
+    "test_reduce_min_negative_axes_keepdims_random_cpu",
+
+    # ReduceProd Op:
+    "test_reduce_prod_default_axes_keepdims_example_cpu",
+    "test_reduce_prod_default_axes_keepdims_random_cpu",
+    "test_reduce_prod_do_not_keepdims_example_cpu",
+    "test_reduce_prod_do_not_keepdims_random_cpu",
+    "test_reduce_prod_keepdims_example_cpu",
+    "test_reduce_prod_keepdims_random_cpu",
+    "test_reduce_prod_negative_axes_keepdims_example_cpu",
+    "test_reduce_prod_negative_axes_keepdims_random_cpu",
+
+    # ReduceSum Op:
+    "test_reduce_sum_default_axes_keepdims_example_cpu",
+    "test_reduce_sum_default_axes_keepdims_random_cpu",
+    "test_reduce_sum_do_not_keepdims_example_cpu",
+    "test_reduce_sum_do_not_keepdims_random_cpu",
+    "test_reduce_sum_keepdims_example_cpu",
+    "test_reduce_sum_keepdims_random_cpu",
+    "test_reduce_sum_negative_axes_keepdims_example_cpu",
+    "test_reduce_sum_negative_axes_keepdims_random_cpu",
+
     # Selu Op:
     "test_selu_cpu",
     "test_selu_default_cpu",
@@ -153,6 +193,8 @@ import inspect
 all_tests = inspect.getmembers(
     backend_test.test_cases["OnnxBackendNodeModelTest"])
 all_test_names = list(map(lambda x: x[0], all_tests))
+for n in all_test_names:
+    print(n)
 
 # Ensure that test names specified in test_to_enable actually exist.
 for test_name in test_to_enable:
