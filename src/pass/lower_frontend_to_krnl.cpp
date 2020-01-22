@@ -1116,13 +1116,13 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     C = operands[2];
 
     bool isTransA =
-        (op->getAttrOfType<IntegerAttr>("Gemm.transA").getInt() != 0);
+        (op->getAttrOfType<IntegerAttr>("transA").getInt() != 0);
     bool isTransB =
-        (op->getAttrOfType<IntegerAttr>("Gemm.transB").getInt() != 0);
+        (op->getAttrOfType<IntegerAttr>("transB").getInt() != 0);
 
-    auto alphaAttr = op->getAttrOfType<FloatAttr>("Gemm.alpha");
+    auto alphaAttr = op->getAttrOfType<FloatAttr>("alpha");
     auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
-    auto betaAttr = op->getAttrOfType<FloatAttr>("Gemm.beta");
+    auto betaAttr = op->getAttrOfType<FloatAttr>("beta");
     auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
 
     // Result type
