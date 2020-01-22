@@ -369,7 +369,7 @@ def gen_code(schema,fefile) :
         #("Transpose", "ImportNodeTranspose")
         ])
     list_str = 'std::vector'
-    empty_ints = list_str+'<int> {}' 
+    empty_ints = list_str+'<int64_t> {}' 
     empty_floats = list_str+'<float> {}' 
     special_default = dict([
         ("AveragePool "+"kernel_shape", empty_ints),
@@ -380,10 +380,12 @@ def gen_code(schema,fefile) :
         ("RNN "+"activation_alpha", empty_floats),
         ("RNN "+"activation_beta", empty_floats)
         ])
+    handle_variadic = True
     line_indent = '  '
     fefile.write('    '+'}else if (OpName == "'+schema.name+'") {\n')
     op_type_str='mlir::ONNX'+schema.name+'Op'
     if schema.name in special_handler :
+        handle_variadic = False 
         fefile.write('       '+special_handler[schema.name]+'(node, '
           +str(len(schema.inputs))
           +', ' +str(len(schema.outputs))+', {\n')
@@ -430,7 +432,7 @@ def gen_code(schema,fefile) :
                         attr_type_str = list_str+'<float>'
                         attr_option_str = attr_option_str.replace("'", '')
                     elif isinstance(value, int) :
-                        attr_type_str = list_str+'<int>'
+                        attr_type_str = list_str+'<int64_t>'
                         attr_option_str = attr_option_str.replace("'", '')
                     elif isinstance(value, str) :
                         attr_type_str = list_str+'<std::string>'
@@ -475,8 +477,24 @@ def gen_code(schema,fefile) :
             attr_line += attr_value
             attr_line += '}\n'
             fefile.write(attr_line)
-    fefile.write(line_indent+line_indent+line_indent+'});\n')
-          
+
+    if not handle_variadic:
+        fefile.write(line_indent+line_indent+line_indent+'});\n')
+    else:
+        fefile.write(line_indent+line_indent+line_indent+line_indent)
+        fefile.write('}')
+
+        variadicIn = 'false'
+        variadicOut = 'false'
+        for input in schema.inputs:
+            if OpSchema.FormalParameterOption.Variadic == input.option:
+                if input.isHomogeneous:
+                    variadicIn = 'true'
+        for output in schema.outputs:
+            if OpSchema.FormalParameterOption.Variadic == output.option:
+                if output.isHomogeneous:
+                    variadicOut = 'true'
+        fefile.write(', '+variadicIn+', '+variadicOut+');\n')
 
 
 def main(args):  # type: (Type[Args]) -> None

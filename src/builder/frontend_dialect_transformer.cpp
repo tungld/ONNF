@@ -375,7 +375,8 @@ private:
   void ImportNodeMultipleOuts(
       const onnx::NodeProto &node, int nIn, int nOut,
       std::initializer_list<std::pair<std::string, AttrValueType>>
-          defaultAttrList) {
+          defaultAttrList,
+      bool variadicIn = false, bool variadicOut = false) {
     std::vector<mlir::Value> inputs;
     for (const auto &item : node.input()) {
       if (frontend_symbols_.ContainKey(legalize_name(item))) {
@@ -393,7 +394,8 @@ private:
 
     llvm::StringRef OpName = node.op_type();
 
-    if (nIn == inputs.size() && nOut == outputTypes.size()) {
+    if ((variadicIn || nIn == inputs.size()) &&
+        (variadicOut || nOut == outputTypes.size())) {
       auto op =
           builder_.create<T>(UnknownLoc(), outputTypes, inputs, attributes);
       for (int i = 0; i < node.output().size(); i++) {
