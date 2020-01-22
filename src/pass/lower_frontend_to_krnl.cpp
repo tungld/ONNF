@@ -1287,13 +1287,13 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     if (axisAttrs) {
       for (auto axisAttr : axisAttrs.getValue()) {
         int axis = axisAttr.cast<IntegerAttr>().getInt();
-        axis = axis >= 0 ? axis : (outRank + axis);
-        assert(axis >= -outRank && axis <= outRank - 1);
+        axis = axis >= 0 ? axis : (inRank + axis);
+        assert(axis >= -inRank && axis <= inRank - 1);
         if (std::find(axes.begin(), axes.end(), axis) == axes.end())
           axes.push_back(axis);
       }
     } else {
-      for (int i = 0; i < outRank; ++i) {
+      for (int i = 0; i < inRank; ++i) {
         axes.push_back(i);
       }
     }

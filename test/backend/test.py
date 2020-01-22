@@ -193,8 +193,6 @@ import inspect
 all_tests = inspect.getmembers(
     backend_test.test_cases["OnnxBackendNodeModelTest"])
 all_test_names = list(map(lambda x: x[0], all_tests))
-for n in all_test_names:
-    print(n)
 
 # Ensure that test names specified in test_to_enable actually exist.
 for test_name in test_to_enable:
