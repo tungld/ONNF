@@ -118,7 +118,8 @@ public:
         op->getName().getStringRef() != "onnx.Reshape" &&
         op->getName().getStringRef() != "onnx.Transpose" &&
         op->getName().getStringRef() != "onnx.Softmax" &&
-        op->getName().getStringRef() != "onnx.ConvNoBias")
+        op->getName().getStringRef() != "onnx.ConvNoBias" &&
+        op->getName().getStringRef() != "onnx.Unsqueeze")
       return false;
     return llvm::any_of(op->getResultTypes(), [](Type result_type) {
       return !result_type.isa<RankedTensorType>();
