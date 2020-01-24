@@ -1108,10 +1108,7 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
-    auto operandType = operands[0].getType().cast<MemRefType>();
     auto tensorType = (*op->result_type_begin()).cast<TensorType>();
-
-    int inRank = operandType.getRank();
     int outRank = tensorType.getRank();
 
     // Assume that `axes` has been validated by shape inference.
@@ -1128,11 +1125,6 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
     auto memRefType = convertTensorToMemRef(tensorType);
     Value alloc;
 
-    // Compute size in bytes.
-    Value tensorSize = rewriter.create<ConstantOp>(
-        loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
-                                     getMemRefEltSizeInBytes(memRefType)));
-
     bool insertDealloc = checkInsertDealloc(op);
     if (hasAllConstantDimensions(memRefType)) {
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
@@ -1142,7 +1134,8 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
       SmallVector<Value, 4> allocOperands;
       for (int outIdx = 0, inIdx = 0; outIdx < memRefShape.size(); ++outIdx) {
         if (memRefShape[outIdx] < 0) {
-          rewriter.create<DimOp>(loc, operands[0], inIdx);
+          auto dimOp = rewriter.create<DimOp>(loc, operands[0], inIdx);
+          allocOperands.emplace_back(dimOp);
         }
         if (std::find(axes.begin(), axes.end(), outIdx) == axes.end())
           inIdx++;
@@ -1154,6 +1147,11 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
         dealloc.getOperation()->moveBefore(&parentBlock->back());
       }
     }
+
+    // Compute size in bytes.
+    Value tensorSize = rewriter.create<ConstantOp>(
+        loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                     getMemRefEltSizeInBytes(memRefType)));
 
     rewriter.create<KrnlMemcpyOp>(loc, alloc, operands[0], tensorSize);
     rewriter.replaceOp(op, alloc);
