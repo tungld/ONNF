@@ -199,7 +199,7 @@ def KrnlSqrtOp : Op<Krnl_Dialect, "sqrt", [NoSideEffect]> {
   }];
 
   let arguments = (ins FloatLike:$operand);
-  let results = (outs AnyType);
+  let results = (outs FloatLike);
 
   let parser = ?;
   let printer = ?;
