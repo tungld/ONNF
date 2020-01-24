@@ -2928,7 +2928,7 @@ def ONNXSplitToSequenceOp:ONNX_Op<"SplitToSequence",
 }
 
 def ONNXSqrtOp:ONNX_Op<"Sqrt", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX Sqrt operation";
   let description = [{
     "Square root takes one input data (Tensor<T>) and produces one output data"
