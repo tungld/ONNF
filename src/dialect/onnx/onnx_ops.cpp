@@ -167,6 +167,22 @@ void ONNXSoftmaxOp::inferShapes() {
 }
 
 //===----------------------------------------------------------------------===//
+// Softplus
+/// Infer the output shape of the ONNXSoftplusOp. This method is required by
+/// the shape inference interface.
+void ONNXSoftplusOp::inferShapes() {
+  getResult().setType(getOperand().getType());
+}
+
+//===----------------------------------------------------------------------===//
+// Softsign
+/// Infer the output shape of the ONNXSoftsignOp. This method is required by
+/// the shape inference interface.
+void ONNXSoftsignOp::inferShapes() {
+  getResult().setType(getOperand().getType());
+}
+
+//===----------------------------------------------------------------------===//
 // Sqrt
 /// Infer the output shape of the ONNXSqrtOp. This method is required by
 /// the shape inference interface.
