@@ -268,7 +268,7 @@ def gen_schema(schema) :
                         'Sum', 'Max', 'Min', 'MatMul', 'Gemm', 'LeakyRelu',
                         'Elu', 'Selu', 'HardSigmoid', 'Reshape', 'Reciprocal',
                         'Identity', 'Cos', 'Log', 'Transpose', 'Softmax',
-                        'Unsqueeze']
+                        'Softplus', 'Softsign', 'Unsqueeze']
     CanonicalList=['Add', 'Identity']
     line_indent = '  '
 
