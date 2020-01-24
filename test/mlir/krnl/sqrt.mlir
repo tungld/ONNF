@@ -14,7 +14,7 @@ module {
 module{
   func @test_sqrt_64(%arg0 : f64) -> f64 {
     %0 = "krnl.sqrt"(%arg0) : (f64) -> f64
-      "std.return"(%0) : (f64) -> ()
+    "std.return"(%0) : (f64) -> ()
 
     // CHECK: llvm.func @llvm.sqrt.f64(!llvm.double) -> !llvm.double
     // CHECK-NEXT: llvm.func @test_sqrt_64(%arg0: !llvm.double) -> !llvm.double {
