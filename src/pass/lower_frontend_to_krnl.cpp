@@ -1138,11 +1138,11 @@ struct ONNXGemmOpLowering : public ConversionPattern {
       SmallVector<Value, 2> allocOperands;
       if (memRefShape[0] < 0) {
         auto dim = rewriter.create<DimOp>(loc, A, (isTransA) ? 1 : 0);
-        allocOperands.push_back(dim);
+        allocOperands.emplace_back(dim);
       }
       if (memRefShape[1] < 0) {
         auto dim = rewriter.create<DimOp>(loc, B, (isTransB) ? 0 : 1);
-        allocOperands.push_back(dim);
+        allocOperands.emplace_back(dim);
       }
       alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
       if (insertDealloc) {
@@ -1255,7 +1255,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // Induction variables
     SmallVector<Value, 4> loopMNIVs;
     for (auto arg : outerIterationBlock.getArguments()) {
-      loopMNIVs.push_back(arg);
+      loopMNIVs.emplace_back(arg);
     }
 
     // Initialize the output of A*B
@@ -1283,7 +1283,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // Induction variables
     SmallVector<Value, 4> loopKIVs, loopAIVs, loopBIVs;
     for (auto arg : matmulIterationBlock.getArguments())
-      loopKIVs.push_back(arg);
+      loopKIVs.emplace_back(arg);
     if (isTransA) {
       loopAIVs.emplace_back(loopKIVs[0]);
       loopAIVs.emplace_back(loopMNIVs[0]);
