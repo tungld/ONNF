@@ -579,3 +579,9 @@ func @test_softmax(%arg0 : tensor<10x10xf32>) -> tensor<*xf32> {
   // CHECK: dealloc [[MAX]] : memref<f32>
   // CHECK: return [[RES]] : memref<10x10xf32>
 }
+
+func @test_unsqueeze(%arg0 : tensor<10x10xf32>) -> tensor<*xf32> {
+  %0 = "onnx.Unsqueeze"(%arg0) {axes=[0,3]} : (tensor<10x10xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+}
+

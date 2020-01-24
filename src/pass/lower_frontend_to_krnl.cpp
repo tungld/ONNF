@@ -1100,6 +1100,67 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   }
 };
 
+struct ONNXUnsqueezeOpLowering : public ConversionPattern {
+  ONNXUnsqueezeOpLowering(MLIRContext *ctx)
+      : ConversionPattern(mlir::ONNXUnsqueezeOp::getOperationName(), 1, ctx) {}
+
+  PatternMatchResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    auto loc = op->getLoc();
+    auto operandType = operands[0].getType().cast<MemRefType>();
+    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+
+    int inRank = operandType.getRank();
+    int outRank = tensorType.getRank();
+
+    // Assume that `axes` has been validated by shape inference.
+    // So, here we just get it.
+    auto axisAttrs = op->getAttrOfType<ArrayAttr>("axes");
+    std::vector<int> axes;
+    for (auto axisAttr : axisAttrs.getValue()) {
+      int axis = axisAttr.cast<IntegerAttr>().getInt();
+      axis = axis >= 0 ? axis : (outRank + axis);
+      axes.push_back(axis);
+    }
+
+    // Insert an allocation and deallocation for the result of this operation.
+    auto memRefType = convertTensorToMemRef(tensorType);
+    Value alloc;
+
+    // Compute size in bytes.
+    Value tensorSize = rewriter.create<ConstantOp>(
+        loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                     getMemRefEltSizeInBytes(memRefType)));
+
+    bool insertDealloc = checkInsertDealloc(op);
+    if (hasAllConstantDimensions(memRefType)) {
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
+    } else {
+      // Unknown dimensions are always the operand's dimensions.
+      auto memRefShape = memRefType.getShape();
+      SmallVector<Value, 4> allocOperands;
+      for (int outIdx = 0, inIdx = 0; outIdx < memRefShape.size(); ++outIdx) {
+        if (memRefShape[outIdx] < 0) {
+          rewriter.create<DimOp>(loc, operands[0], inIdx);
+        }
+        if (std::find(axes.begin(), axes.end(), outIdx) == axes.end())
+          inIdx++;
+      }
+      alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
+      auto *parentBlock = alloc.getDefiningOp()->getBlock();
+      if (insertDealloc) {
+        auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
+        dealloc.getOperation()->moveBefore(&parentBlock->back());
+      }
+    }
+
+    rewriter.create<KrnlMemcpyOp>(loc, alloc, operands[0], tensorSize);
+    rewriter.replaceOp(op, alloc);
+    return matchSuccess();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
 //===----------------------------------------------------------------------===//
@@ -1225,7 +1286,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMaxOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMinOp>,
                   ONNXReshapeOpLowering, ONNXEntryPointLowering,
-                  ONNXSoftmaxOpLowering>(&getContext());
+                  ONNXSoftmaxOpLowering, ONNXUnsqueezeOpLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`
