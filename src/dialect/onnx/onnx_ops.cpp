@@ -343,17 +343,98 @@ void ONNXMatMulOp::inferShapes() {
   if (!getOperand(0).getType().isa<RankedTensorType>() ||
       !getOperand(1).getType().isa<RankedTensorType>())
     return;
+
   auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
   auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
+
   SmallVector<int64_t, 2> dims;
-  dims.emplace_back(lhsTy.getShape()[0]);
-  dims.emplace_back(rhsTy.getShape()[1]);
+  auto lhsShape = lhsTy.getShape();
+  auto rhsShape = rhsTy.getShape();
+
+  if (lhsShape.size() < 1 && rhsShape.size() < 1) {
+    // Multiplication by scalars is not allowed.
+    emitError("Multiplication by scalar arguments not allowed.");
+  } else if (lhsShape.size() == 1 && rhsShape.size() == 1) {
+    // Special case when both arrays are 1-dimensional and according to
+    // numpy rules the types need to be extended to 1xN and Nx1. Helper sizes
+    // need to be removed after the multiplication but cannot be removed if all
+    // sizes are 1.
+    if (lhsShape[0] != -1 && rhsShape[0] != -1 &&
+        lhsShape[0] != rhsShape[0])
+      emitError("Attempt to multiply incompatible matrices.");
+    dims.emplace_back(1);
+  } else if (lhsShape.size() > 2 && rhsShape.size() == 2) {
+    // (s1 x s2 x... x sK x M x N) MATMUL (N x P)
+    // =>
+    // (s1 x s2 x... x sK x M x P)
+
+    // Check legality of matrix multiplication.
+    unsigned lhsRank = lhsShape.size();
+    if (lhsShape[lhsRank - 1] != -1 && rhsShape[0] != -1 &&
+        lhsShape[lhsRank - 1] != rhsShape[0])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    for (int i = 0; i < lhsRank - 1; ++i)
+      dims.emplace_back(lhsShape[i]);
+    dims.emplace_back(rhsShape[1]);
+  } else if (lhsShape.size() == 2 && rhsShape.size() > 2) {
+    // (M x N) MATMUL (s1 x s2 x... x sK x N x P)
+    // =>
+    // (s1 x s2 x... x sK x M x P)
+
+    // Check legality of matrix multiplication.
+    unsigned rhsRank = rhsShape.size();
+    if (lhsShape[1] != -1 && rhsShape[rhsRank - 2] != -1 &&
+        lhsShape[1] != rhsShape[rhsRank - 2])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    for (int i = 0; i < rhsRank - 2; ++i)
+      dims.emplace_back(rhsShape[i]);
+    dims.emplace_back(lhsShape[0]);
+    dims.emplace_back(rhsShape[rhsRank - 1]);
+  } else if (lhsShape.size() > 2 && rhsShape.size() > 2) {
+    // (s1 x s2 x... x sK x M x N) MATMUL (t1 x t2 x... x tK x N x P)
+    // =>
+    // (u1 x u2 x... x uK x M x P)
+
+    // Check legality of matrix multiplication.
+    unsigned lhsRank = lhsShape.size();
+    unsigned rhsRank = rhsShape.size();
+    if (lhsShape[lhsRank - 1] != -1 && rhsShape[rhsRank - 2] != -1 &&
+        lhsShape[lhsRank - 1] != rhsShape[rhsRank - 2])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    // Check and perform broadcasting for the shapes.
+    SmallVector<int64_t, 2> lhsBcastShape;
+    for (int i = 0; i < lhsRank - 2; ++i)
+      lhsBcastShape.emplace_back(lhsShape[i]);
+    SmallVector<int64_t, 2> rhsBcastShape;
+    for (int i = 0; i < rhsRank - 2; ++i)
+      rhsBcastShape.emplace_back(rhsShape[i]);
+    if (!getBroadcastedShape(lhsBcastShape, rhsBcastShape, dims))
+      emitError("Broadcasted dimensions are incompatible.");
+
+    dims.emplace_back(lhsShape[lhsRank - 2]);
+    dims.emplace_back(rhsShape[rhsRank - 1]);
+  } else {
+    // This case covers all remaining combinations of 1 and 2-D matrices.
+    int64_t lhsDim = lhsShape[0];
+    int64_t rhsDim = rhsShape[0];
+    if (lhsShape.size() > 1) {
+      lhsDim = lhsShape[1];
+      dims.emplace_back(lhsShape[0]);
+    }
+
+    // Check legality of matrix multiplication.
+    if (lhsDim != -1 && rhsDim != -1 && lhsDim != rhsDim)
+      emitError("Attempt to multiply incompatible matrices.");
+
+    if (rhsShape.size() > 1)
+      dims.emplace_back(rhsShape[1]);
+  }
+
   getResult().setType(RankedTensorType::get(dims, lhsTy.getElementType()));
 }
-
-// TODO:
-//   Verify that matrix sizes are valid.
-//   Take into account the dimensionality of the matrix.
 
 //===----------------------------------------------------------------------===//
 
@@ -449,8 +530,10 @@ void ONNXTransposeOp::inferShapes() {
   auto arrayTy = getOperand().getType().cast<RankedTensorType>();
   SmallVector<int64_t, 2> dims;
 
-  if (auto permutation = getAttrOfType<ArrayAttr>(
-          ONNXTransposeOp::getPermAttrName())) {
+  //if (auto permutation = getAttrOfType<ArrayAttr>(
+   //       ONNXTransposeOp::getPermAttrName())) {
+  auto permutation = ONNXTransposeOp::permAttr();
+  if (permutation) {
     // Perform transposition according to perm attribute.
     for (auto perm : permutation.getValue())
       dims.emplace_back(arrayTy.getShape()[perm.cast<IntegerAttr>().getInt()]);
@@ -463,20 +546,6 @@ void ONNXTransposeOp::inferShapes() {
   getResult().setType(RankedTensorType::get(dims, arrayTy.getElementType()));
 }
 
-LogicalResult verify(ONNXTransposeOp op) {
-  auto module = op.getParentOfType<ModuleOp>();
-  if (!module)
-    op.emitError("Expected to belong to a module.");
-
-  if (auto permutation = op.getAttrOfType<ArrayAttr>(
-          ONNXTransposeOp::getPermAttrName())) {
-    for (auto perm : permutation.getValue())
-      if (perm.cast<IntegerAttr>().getInt() < 0)
-        op.emitError("Cannot tranpose, permuation contains negative index.");
-  }
-
-  return success();
-}
 
 //===----------------------------------------------------------------------===//
 
@@ -505,11 +574,9 @@ void ONNXConvNoBiasOp::inferShapes() {
     emitError("Weight size not compatible with data size.");
 
   // Required attribute auto_pad defaults to NOTSET.
-  auto autoPad = getAttrOfType<StringAttr>(
-      ONNXConvOp::getAutoPadAttrName()).getValue();
+  auto autoPad = auto_pad();
   // Group is a required attribute and should have default value of 1.
-  int64_t group = getAttrOfType<IntegerAttr>(
-      ONNXConvOp::getGroupAttrName()).getInt();
+  int64_t group = ONNXConvNoBiasOp::group().getSExtValue(); //.getLimitedValue();
   // Check that the X.shape[1] == (W.shape[1] * group) == C condition holds.
   if (dataShape[1] != (weightShape[1] * group))
     emitError("Channel dimension mismatch.");
@@ -541,8 +608,7 @@ void ONNXConvNoBiasOp::inferShapes() {
   // Use kernel_shape attribute if present otherwise use size from weight
   // argument.
   SmallVector<int64_t, 2> kernelDims;
-  if (auto kernelShape = getAttrOfType<ArrayAttr>(
-          ONNXConvOp::getKernelShapeAttrName())) {
+  if (auto kernelShape = kernel_shapeAttr()) {
     if (kernelShape.getValue().size() != nDims)
       emitError("kernel_shape length incompatible with spatial dimensions.");
     for (int i = 0; i < nDims; ++i)
@@ -564,8 +630,7 @@ void ONNXConvNoBiasOp::inferShapes() {
   //
   // From a dimensionality perspective the kernel size becomes the dilated
   // kernel size.
-  if (auto dilations = getAttrOfType<ArrayAttr>(
-          ONNXConvOp::getDilationsAttrName())) {
+  if (auto dilations = dilationsAttr()) {
     if (dilations.getValue().size() != nDims)
       emitError("dilations length incompatible with spatial dimensions.");
     for (int i = 0; i < nDims; ++i)
@@ -581,8 +646,7 @@ void ONNXConvNoBiasOp::inferShapes() {
   if (autoPad == "NOTSET") {
     // Use pads to to determine the padding. If attribute is not
     // present then pads is considered to be all zeros (no padding).
-    if (auto pads = getAttrOfType<ArrayAttr>(
-            ONNXConvOp::getPadsAttrName())) {
+    if (auto pads = padsAttr()) {
       // pads consists of two entries for each spatial axis.
       if (pads.getValue().size() != 2 * nDims)
         emitError("pads size is not twice the spatial size.");
@@ -613,13 +677,12 @@ void ONNXConvNoBiasOp::inferShapes() {
   }
 
   // Strides
-  if (auto strides = getAttrOfType<ArrayAttr>(
-      ONNXConvOp::getStridesAttrName())) {
+  if (auto strides = ONNXConvNoBiasOp::stridesAttr()) {
     if (strides.getValue().size() != nDims)
       emitError("strides length incompatible with spatial dimensions.");
     for (int i = 0; i < nDims; ++i) {
       int64_t stride =
-          (strides.getValue()[i]).cast<IntegerAttr>().getInt();
+          strides.getValue()[i].cast<IntegerAttr>().getInt();
       outSpatialDims[i] = floor(outSpatialDims[i] / stride);
     }
   }
@@ -629,28 +692,6 @@ void ONNXConvNoBiasOp::inferShapes() {
 
   dims.append(outSpatialDims.begin(), outSpatialDims.end());
   getResult().setType(RankedTensorType::get(dims, dataTy.getElementType()));
-}
-
-LogicalResult verify(ONNXConvNoBiasOp op) {
-  auto module = op.getParentOfType<ModuleOp>();
-  if (!module)
-    op.emitError("expected to belong to a module");
-
-  auto autoPadAttr = op.getAttrOfType<StringAttr>(
-      ONNXConvOp::getAutoPadAttrName());
-  if (!autoPadAttr)
-    op.emitError("auto_pad attribute not specified.");
-  if (autoPadAttr.getValue() != "NOTSET")
-    if (auto pads = op.getAttrOfType<ArrayAttr>(
-            ONNXConvOp::getPadsAttrName()))
-      op.emitError("auto_pad and pads are both set.");
-
-  auto groupAttr =
-      op.getAttrOfType<IntegerAttr>(ONNXConvOp::getGroupAttrName());
-  if (!groupAttr)
-    op.emitError("group attribute not specified.");
-
-  return success();
 }
 
 //===----------------------------------------------------------------------===//
