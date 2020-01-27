@@ -1165,12 +1165,23 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
     auto memRefType = convertTensorToMemRef(tensorType);
     Value alloc;
 
+    // Compute size in bytes.
+    Value tensorSize = rewriter.create<ConstantOp>(
+        loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                     getMemRefEltSizeInBytes(memRefType)));
+
     bool insertDealloc = checkInsertDealloc(op);
+    auto memRefShape = memRefType.getShape();
     if (hasAllConstantDimensions(memRefType)) {
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
+      for (int i = 0; i < memRefShape.size(); ++i) {
+        Value dimVal = rewriter.create<ConstantOp>(
+            loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                         memRefShape[i]));
+        tensorSize = rewriter.create<MulIOp>(loc, tensorSize, dimVal);
+      }
     } else {
       // Unknown dimensions are always the operand's dimensions.
-      auto memRefShape = memRefType.getShape();
       SmallVector<Value, 4> allocOperands;
       for (int outIdx = 0, inIdx = 0; outIdx < memRefShape.size(); ++outIdx) {
         if (memRefShape[outIdx] < 0) {
@@ -1187,11 +1198,6 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
         dealloc.getOperation()->moveBefore(&parentBlock->back());
       }
     }
-
-    // Compute size in bytes.
-    Value tensorSize = rewriter.create<ConstantOp>(
-        loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
-                                     getMemRefEltSizeInBytes(memRefType)));
 
     rewriter.create<KrnlMemcpyOp>(loc, alloc, operands[0], tensorSize);
     rewriter.replaceOp(op, alloc);
