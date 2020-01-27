@@ -27,240 +27,240 @@ print("ONNX_ML", ONNX_ML)
 
 
 if ONNX_ML:
-ext = '-ml.md'
+    ext = '-ml.md'
 else:
-ext = '.md'
+    ext = '.md'
 
 
 def display_number(v):  # type: (int) -> Text
-if defs.OpSchema.is_infinite(v):
-    return '&#8734;'
-return Text(v)
+    if defs.OpSchema.is_infinite(v):
+        return '&#8734;'
+    return Text(v)
 
 
 def should_render_domain(domain):  # type: (Text) -> bool
-if domain == ONNX_ML_DOMAIN and not ONNX_ML:
-    return False
-elif ONNX_ML and domain != ONNX_ML_DOMAIN:
-    return False
-return True
+    if domain == ONNX_ML_DOMAIN and not ONNX_ML:
+        return False
+    elif ONNX_ML and domain != ONNX_ML_DOMAIN:
+        return False
+    return True
 
 
 def format_name_with_domain(domain, schema_name):  # type: (Text, Text) -> Text
-if domain:
-    return '{}.{}'.format(domain, schema_name)
-else:
-    return schema_name
+    if domain:
+        return '{}.{}'.format(domain, schema_name)
+    else:
+        return schema_name
 
 
 def display_attr_type(v):  # type: (OpSchema.AttrType) -> Text
-assert isinstance(v, OpSchema.AttrType)
-s = Text(v)
-s = s[s.rfind('.') + 1:].lower()
-if s[-1] == 's':
-    s = 'list of ' + s
-return s
+    assert isinstance(v, OpSchema.AttrType)
+    s = Text(v)
+    s = s[s.rfind('.') + 1:].lower()
+    if s[-1] == 's':
+        s = 'list of ' + s
+    return s
 
 
 def display_domain(domain):  # type: (Text) -> Text
-if domain:
-    return "the '{}' operator set".format(domain)
-else:
-    return "the default ONNX operator set"
+    if domain:
+        return "the '{}' operator set".format(domain)
+    else:
+        return "the default ONNX operator set"
 
 
 def display_domain_short(domain):  # type: (Text) -> Text
-if domain:
-    return domain
-else:
-    return 'ai.onnx (default)'
+    if domain:
+        return domain
+    else:
+        return 'ai.onnx (default)'
 
 
 def display_version_link(name, version):  # type: (Text, int) -> Text
-changelog_md = 'Changelog' + ext
-name_with_ver = '{}-{}'.format(name, version)
-return '<a href="{}#{}">{}</a>'.format(changelog_md, name_with_ver, name_with_ver)
+    changelog_md = 'Changelog' + ext
+    name_with_ver = '{}-{}'.format(name, version)
+    return '<a href="{}#{}">{}</a>'.format(changelog_md, name_with_ver, name_with_ver)
 
 
 def display_schema(schema, versions):  # type: (OpSchema, Sequence[OpSchema]) -> Text
-s = ''
+    s = ''
 
-# doc
-if schema.doc:
-    s += '\n'
-    s += '\n'.join('  ' + line
-                   for line in schema.doc.lstrip().splitlines())
-    s += '\n'
+    # doc
+    if schema.doc:
+        s += '\n'
+        s += '\n'.join('  ' + line
+                       for line in schema.doc.lstrip().splitlines())
+        s += '\n'
 
-# since version
-s += '\n#### Version\n'
-if schema.support_level == OpSchema.SupportType.EXPERIMENTAL:
-    s += '\nNo versioning maintained for experimental ops.'
-else:
-    s += '\nThis version of the operator has been ' + ('deprecated' if schema.deprecated else 'available') + ' since version {}'.format(schema.since_version)
-    s += ' of {}.\n'.format(display_domain(schema.domain))
-    if len(versions) > 1:
-        # TODO: link to the Changelog.md
-        s += '\nOther versions of this operator: {}\n'.format(
-            ', '.join(display_version_link(format_name_with_domain(v.domain, v.name),
-                                           v.since_version) for v in versions[:-1]))
+    # since version
+    s += '\n#### Version\n'
+    if schema.support_level == OpSchema.SupportType.EXPERIMENTAL:
+        s += '\nNo versioning maintained for experimental ops.'
+    else:
+        s += '\nThis version of the operator has been ' + ('deprecated' if schema.deprecated else 'available') + ' since version {}'.format(schema.since_version)
+        s += ' of {}.\n'.format(display_domain(schema.domain))
+        if len(versions) > 1:
+            # TODO: link to the Changelog.md
+            s += '\nOther versions of this operator: {}\n'.format(
+                ', '.join(display_version_link(format_name_with_domain(v.domain, v.name),
+                                               v.since_version) for v in versions[:-1]))
 
-# If this schema is deprecated, don't display any of the following sections
-if schema.deprecated:
+    # If this schema is deprecated, don't display any of the following sections
+    if schema.deprecated:
+        return s
+
+    # attributes
+    if schema.attributes:
+        s += '\n#### Attributes\n\n'
+        s += '<dl>\n'
+        for _, attr in sorted(schema.attributes.items()):
+            # option holds either required or default value
+            opt = ''
+            if attr.required:
+                opt = 'required'
+            elif attr.default_value.name:
+                default_value = helper.get_attribute_value(attr.default_value)
+
+                def format_value(value):  # type: (Any) -> Text
+                    if isinstance(value, float):
+                        formatted = str(np.round(value, 5))
+                        # use default formatting, unless too long.
+                        if (len(formatted) > 10):
+                            formatted = str("({:e})".format(value))
+                        return formatted
+                    elif isinstance(value, (bytes, bytearray)) and sys.version_info[0] == 3:
+                        return str(value.decode('utf-8'))
+                    return str(value)
+
+                if isinstance(default_value, list):
+                    default_value = [format_value(val) for val in default_value]
+                else:
+                    default_value = format_value(default_value)
+                opt = 'default is {}'.format(default_value)
+
+            s += '<dt><tt>{}</tt> : {}{}</dt>\n'.format(
+                attr.name,
+                display_attr_type(attr.type),
+                ' ({})'.format(opt) if opt else '')
+            s += '<dd>{}</dd>\n'.format(attr.description)
+        s += '</dl>\n'
+
+    # inputs
+    s += '\n#### Inputs'
+    if schema.min_input != schema.max_input:
+        s += ' ({} - {})'.format(display_number(schema.min_input),
+                                 display_number(schema.max_input))
+    s += '\n\n'
+    if schema.inputs:
+        s += '<dl>\n'
+        for input in schema.inputs:
+            option_str = ""
+            if OpSchema.FormalParameterOption.Optional == input.option:
+                option_str = " (optional)"
+            elif OpSchema.FormalParameterOption.Variadic == input.option:
+                if input.isHomogeneous:
+                    option_str = " (variadic)"
+                else:
+                    option_str = " (variadic, heterogeneous)"
+            s += '<dt><tt>{}</tt>{} : {}</dt>\n'.format(input.name, option_str, input.typeStr)
+            s += '<dd>{}</dd>\n'.format(input.description)
+        s += '</dl>\n'
+
+    # outputs
+    s += '\n#### Outputs'
+    if schema.min_output != schema.max_output:
+        s += ' ({} - {})'.format(display_number(schema.min_output),
+                                 display_number(schema.max_output))
+    s += '\n\n'
+
+    if schema.outputs:
+        s += '<dl>\n'
+        for output in schema.outputs:
+            option_str = ""
+            if OpSchema.FormalParameterOption.Optional == output.option:
+                option_str = " (optional)"
+            elif OpSchema.FormalParameterOption.Variadic == output.option:
+                if output.isHomogeneous:
+                    option_str = " (variadic)"
+                else:
+                    option_str = " (variadic, heterogeneous)"
+            s += '<dt><tt>{}</tt>{} : {}</dt>\n'.format(output.name, option_str, output.typeStr)
+            s += '<dd>{}</dd>\n'.format(output.description)
+        s += '</dl>\n'
+
+    # type constraints
+    s += '\n#### Type Constraints'
+    s += '\n\n'
+    if schema.type_constraints:
+        s += '<dl>\n'
+        for type_constraint in schema.type_constraints:
+            allowedTypes = type_constraint.allowed_type_strs
+            if (len(allowedTypes) > 0):
+                allowedTypeStr = allowedTypes[0]
+            for allowedType in allowedTypes[1:]:
+                allowedTypeStr += ', ' + allowedType
+            s += '<dt><tt>{}</tt> : {}</dt>\n'.format(
+                type_constraint.type_param_str, allowedTypeStr)
+            s += '<dd>{}</dd>\n'.format(type_constraint.description)
+        s += '</dl>\n'
+
+    # Function Body
+    if schema.has_function:  # type: ignore
+        s += '\n#### Function\n'
+        s += '\nThe Function can be represented as a function.\n'
+
     return s
-
-# attributes
-if schema.attributes:
-    s += '\n#### Attributes\n\n'
-    s += '<dl>\n'
-    for _, attr in sorted(schema.attributes.items()):
-        # option holds either required or default value
-        opt = ''
-        if attr.required:
-            opt = 'required'
-        elif attr.default_value.name:
-            default_value = helper.get_attribute_value(attr.default_value)
-
-            def format_value(value):  # type: (Any) -> Text
-                if isinstance(value, float):
-                    formatted = str(np.round(value, 5))
-                    # use default formatting, unless too long.
-                    if (len(formatted) > 10):
-                        formatted = str("({:e})".format(value))
-                    return formatted
-                elif isinstance(value, (bytes, bytearray)) and sys.version_info[0] == 3:
-                    return str(value.decode('utf-8'))
-                return str(value)
-
-            if isinstance(default_value, list):
-                default_value = [format_value(val) for val in default_value]
-            else:
-                default_value = format_value(default_value)
-            opt = 'default is {}'.format(default_value)
-
-        s += '<dt><tt>{}</tt> : {}{}</dt>\n'.format(
-            attr.name,
-            display_attr_type(attr.type),
-            ' ({})'.format(opt) if opt else '')
-        s += '<dd>{}</dd>\n'.format(attr.description)
-    s += '</dl>\n'
-
-# inputs
-s += '\n#### Inputs'
-if schema.min_input != schema.max_input:
-    s += ' ({} - {})'.format(display_number(schema.min_input),
-                             display_number(schema.max_input))
-s += '\n\n'
-if schema.inputs:
-    s += '<dl>\n'
-    for input in schema.inputs:
-        option_str = ""
-        if OpSchema.FormalParameterOption.Optional == input.option:
-            option_str = " (optional)"
-        elif OpSchema.FormalParameterOption.Variadic == input.option:
-            if input.isHomogeneous:
-                option_str = " (variadic)"
-            else:
-                option_str = " (variadic, heterogeneous)"
-        s += '<dt><tt>{}</tt>{} : {}</dt>\n'.format(input.name, option_str, input.typeStr)
-        s += '<dd>{}</dd>\n'.format(input.description)
-    s += '</dl>\n'
-
-# outputs
-s += '\n#### Outputs'
-if schema.min_output != schema.max_output:
-    s += ' ({} - {})'.format(display_number(schema.min_output),
-                             display_number(schema.max_output))
-s += '\n\n'
-
-if schema.outputs:
-    s += '<dl>\n'
-    for output in schema.outputs:
-        option_str = ""
-        if OpSchema.FormalParameterOption.Optional == output.option:
-            option_str = " (optional)"
-        elif OpSchema.FormalParameterOption.Variadic == output.option:
-            if output.isHomogeneous:
-                option_str = " (variadic)"
-            else:
-                option_str = " (variadic, heterogeneous)"
-        s += '<dt><tt>{}</tt>{} : {}</dt>\n'.format(output.name, option_str, output.typeStr)
-        s += '<dd>{}</dd>\n'.format(output.description)
-    s += '</dl>\n'
-
-# type constraints
-s += '\n#### Type Constraints'
-s += '\n\n'
-if schema.type_constraints:
-    s += '<dl>\n'
-    for type_constraint in schema.type_constraints:
-        allowedTypes = type_constraint.allowed_type_strs
-        if (len(allowedTypes) > 0):
-            allowedTypeStr = allowedTypes[0]
-        for allowedType in allowedTypes[1:]:
-            allowedTypeStr += ', ' + allowedType
-        s += '<dt><tt>{}</tt> : {}</dt>\n'.format(
-            type_constraint.type_param_str, allowedTypeStr)
-        s += '<dd>{}</dd>\n'.format(type_constraint.description)
-    s += '</dl>\n'
-
-# Function Body
-if schema.has_function:  # type: ignore
-    s += '\n#### Function\n'
-    s += '\nThe Function can be represented as a function.\n'
-
-return s
 
 
 def support_level_str(level):  # type: (OpSchema.SupportType) -> Text
-return \
-    "<sub>experimental</sub> " if level == OpSchema.SupportType.EXPERIMENTAL else ""
+    return \
+        "<sub>experimental</sub> " if level == OpSchema.SupportType.EXPERIMENTAL else ""
 
 def convert_type(tstr) :
-tfrom = np.array(['bool', 'int8', 'int16', 'int32', 'int64',
-        'unkown', 'float16', 'float', 'double'])
-tto =np.array(['I1', 'I8', 'I16', 'I32', 'I64',
-     'BF16', 'F16', 'F32', 'F64'])
-index = -1
-for i in range(len(tfrom)) :
-    if tfrom[i] in tstr :
-        index = i
-        break
-if index == -1 :
-    print("error", tstr)
-    return ''
-else :
-    return tto[i]
+    tfrom = np.array(['bool', 'int8', 'int16', 'int32', 'int64',
+            'unkown', 'float16', 'float', 'double'])
+    tto =np.array(['I1', 'I8', 'I16', 'I32', 'I64',
+         'BF16', 'F16', 'F32', 'F64'])
+    index = -1
+    for i in range(len(tfrom)) :
+        if tfrom[i] in tstr :
+            index = i
+            break
+    if index == -1 :
+        print("error", tstr)
+        return ''
+    else :
+        return tto[i]
 
 def  collect_types(schema, input) :
-allowedTypeStr=''
-#first step just ignore the type constraints
-return allowedTypeStr
-if input.typeStr :
-    tstr = input.typeStr
-else :
-    return allwedTypeStr
-if schema.type_constraints:
-    for type_constraint in schema.type_constraints:
-        if type_constraint.type_param_str != tstr :
-            continue
-        allowedTypes = type_constraint.allowed_type_strs
-        allowedTypeStr=''
-        if (len(allowedTypes) > 0):
-            t = convert_type(allowedTypes[0])
-            if t == '' :
-                return ''
-            allowedTypeStr += t
-        for allowedType in allowedTypes[1:]:
-            t = convert_type(allowedType)
-            if t == '' :
-                return ''
-            if  not t in allowedTypeStr :
-                allowedTypeStr += ', '+t
+    allowedTypeStr=''
+    #first step just ignore the type constraints
+    return allowedTypeStr
+    if input.typeStr :
+        tstr = input.typeStr
+    else :
+        return allwedTypeStr
+    if schema.type_constraints:
+        for type_constraint in schema.type_constraints:
+            if type_constraint.type_param_str != tstr :
+                continue
+            allowedTypes = type_constraint.allowed_type_strs
+            allowedTypeStr=''
+            if (len(allowedTypes) > 0):
+                t = convert_type(allowedTypes[0])
+                if t == '' :
+                    return ''
+                allowedTypeStr += t
+            for allowedType in allowedTypes[1:]:
+                t = convert_type(allowedType)
+                if t == '' :
+                    return ''
+                if  not t in allowedTypeStr :
+                    allowedTypeStr += ', '+t
 
-        return allowedTypeStr
+            return allowedTypeStr
 
-return allowedTypeStr
+    return allowedTypeStr
 
 def gen_schema(schema) :
     ShapeInferenceList=['Exp', 'Tanh', 'Sinh', 'Cosh', 'Sigmoid', 'Relu',
