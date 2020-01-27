@@ -1184,10 +1184,18 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
       // Unknown dimensions are always the operand's dimensions.
       SmallVector<Value, 4> allocOperands;
       for (int outIdx = 0, inIdx = 0; outIdx < memRefShape.size(); ++outIdx) {
+        Value dimVal = nullptr;
         if (memRefShape[outIdx] < 0) {
-          auto dimOp = rewriter.create<DimOp>(loc, operands[0], inIdx);
-          allocOperands.emplace_back(dimOp);
+          Value index = rewriter.create<DimOp>(loc, operands[0], inIdx);
+          dimVal = rewriter.create<IndexCastOp>(
+              loc, index, rewriter.getIntegerType(64));
+          allocOperands.emplace_back(index);
+        } else {
+          dimVal = rewriter.create<ConstantOp>(
+              loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                           memRefShape[outIdx]));
         }
+        tensorSize = rewriter.create<MulIOp>(loc, tensorSize, dimVal);
         if (std::find(axes.begin(), axes.end(), outIdx) == axes.end())
           inIdx++;
       }
