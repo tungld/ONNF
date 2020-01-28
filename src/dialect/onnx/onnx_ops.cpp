@@ -687,7 +687,7 @@ void ONNXUnsqueezeOp::inferShapes() {
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
   int inRank = operandTy.getRank();
 
-  auto axisAttrs = getAttrOfType<ArrayAttr>("axes");
+  ArrayAttr axisAttrs = axesAttr();
   std::vector<int> axes;
   int outRank = 0;
   if (axisAttrs) {

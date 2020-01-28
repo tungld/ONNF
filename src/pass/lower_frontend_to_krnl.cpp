@@ -1159,7 +1159,7 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
 
     // Assume that `axes` has been validated by shape inference.
     // So, here we just get it.
-    auto axisAttrs = op->getAttrOfType<ArrayAttr>("axes");
+    ArrayAttr axisAttrs = llvm::dyn_cast<ONNXUnsqueezeOp>(op).axesAttr();
     std::vector<int> axes;
     for (auto axisAttr : axisAttrs.getValue()) {
       int axis = axisAttr.cast<IntegerAttr>().getInt();
