@@ -1161,14 +1161,18 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     B = operands[1];
     C = operands[2];
 
-    bool isTransA =
-        (op->getAttrOfType<IntegerAttr>("transA").getInt() != 0);
-    bool isTransB =
-        (op->getAttrOfType<IntegerAttr>("transB").getInt() != 0);
+    IntegerAttr transAAttr = llvm::dyn_cast<ONNXGemmOp>(op).transAAttr();
+    IntegerAttr transBAttr = llvm::dyn_cast<ONNXGemmOp>(op).transBAttr();
+    bool isTransA = transAAttr ? (transAAttr.getInt() != 0) : false;
+    bool isTransB = transBAttr ? (transBAttr.getInt() != 0) : false;
 
-    auto alphaAttr = op->getAttrOfType<FloatAttr>("alpha");
+    FloatAttr alphaAttr = llvm::dyn_cast<ONNXGemmOp>(op).alphaAttr();
+    alphaAttr = alphaAttr ? alphaAttr
+                          : FloatAttr::get(tensorType.getElementType(), 1.0);
+    FloatAttr betaAttr = llvm::dyn_cast<ONNXGemmOp>(op).betaAttr();
+    betaAttr =
+        betaAttr ? betaAttr : FloatAttr::get(tensorType.getElementType(), 1.0);
     auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
-    auto betaAttr = op->getAttrOfType<FloatAttr>("beta");
     auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
 
     // Result type

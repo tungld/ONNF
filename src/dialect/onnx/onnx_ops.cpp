@@ -447,8 +447,10 @@ void ONNXGemmOp::inferShapes() {
     return;
   auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
   auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
-  int64_t transA = getAttrOfType<IntegerAttr>("transA").getInt();
-  int64_t transB = getAttrOfType<IntegerAttr>("transB").getInt();
+  IntegerAttr transAAttr = this->transAAttr();
+  IntegerAttr transBAttr = this->transBAttr();
+  int64_t transA = transAAttr ? transAAttr.getInt() : 0;
+  int64_t transB = transBAttr ? transBAttr.getInt() : 0;
 
   int64_t M, N, K_A, K_B;
   M = (transA == 0) ? lhsTy.getShape()[0] : lhsTy.getShape()[1];
