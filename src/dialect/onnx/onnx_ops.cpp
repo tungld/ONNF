@@ -443,10 +443,12 @@ void ONNXMatMulOp::inferShapes() {
 void ONNXGemmOp::inferShapes() {
   // Cannot infer shape if no shape exists.
   if (!getOperand(0).getType().isa<RankedTensorType>() ||
-      !getOperand(1).getType().isa<RankedTensorType>())
+      !getOperand(1).getType().isa<RankedTensorType>() ||
+      !getOperand(2).getType().isa<RankedTensorType>())
     return;
   auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
   auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
+  auto biasTy = getOperand(2).getType().cast<RankedTensorType>();
 
   int64_t M, N, K_A, K_B;
   M = (transA() == 0) ? lhsTy.getShape()[0] : lhsTy.getShape()[1];
@@ -456,6 +458,18 @@ void ONNXGemmOp::inferShapes() {
 
   if ((K_A != -1) and (K_B != -1) and (K_A != K_B)) {
     emitError("Tensor shapes mismatched.");
+    return;
+  }
+
+  // Check whether bias is unidirectional broadcasting or not.
+  auto shape = biasTy.getShape();
+  int rank = shape.size();
+  if ((rank > 2) ||
+      (rank >= 1 && shape[rank - 1] != -1 && N != -1 && N != shape[rank - 1] &&
+       shape[rank - 1] != 1) ||
+      (rank == 2 && shape[rank - 2] != -1 && M != -1 && M != shape[rank - 2] &&
+       shape[rank - 2] != 1)) {
+    emitError("Bias shape mismatched.");
     return;
   }
 
