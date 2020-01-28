@@ -226,7 +226,7 @@ private:
     std::string _name;
 
     mlir::NamedAttribute operator()(int64_t const &r) {
-      auto val = _builder.getI32IntegerAttr(r);
+      auto val = _builder.getI64IntegerAttr(r);
       return _builder.getNamedAttr(_name, val);
     }
 
@@ -288,21 +288,12 @@ private:
   }
 
   std::vector<mlir::NamedAttribute> ImportNodeAttributes(
-      const onnx::NodeProto &node,
-      std::initializer_list<std::pair<std::string, AttrValueType>>
-          defaultAttrList) {
+      const onnx::NodeProto &node) {
     std::vector<mlir::NamedAttribute> attributes;
-    std::set<std::string> definedAttributeSet;
     for (int i = 0; i < node.attribute_size(); ++i) {
       auto attr = node.attribute(i);
       auto nameValPair = convertAttributeProtoToNameValuePair(attr);
       attributes.push_back(convertNameValuePairToNamedAttribute(nameValPair));
-      definedAttributeSet.insert(attr.name());
-    }
-    for (const auto &defaultAttr : defaultAttrList) {
-      if (definedAttributeSet.find(defaultAttr.first) ==
-          definedAttributeSet.end())
-        attributes.push_back(convertNameValuePairToNamedAttribute(defaultAttr));
     }
     return attributes;
   }
@@ -339,11 +330,8 @@ private:
    * default}
    */
   template <typename T>
-  void
-  ImportNodeOneOut(const onnx::NodeProto &node, int nIn, int nOut,
-                   std::initializer_list<std::pair<std::string, AttrValueType>>
-                       defaultAttrList,
-                   bool variadicIn = false, bool variadicOut = false) {
+  void ImportNodeOneOut(const onnx::NodeProto &node, int nIn, int nOut,
+                        bool variadicIn = false, bool variadicOut = false) {
     std::vector<mlir::Value> inputs;
     for (const auto &item : node.input()) {
       if (frontend_symbols_.ContainKey(legalize_name(item))) {
@@ -357,7 +345,7 @@ private:
           mlir::UnrankedTensorType::get(builder_.getF32Type()));
     }
 
-    auto attributes = ImportNodeAttributes(node, defaultAttrList);
+    auto attributes = ImportNodeAttributes(node);
 
     llvm::StringRef OpName = node.op_type();
     if ((variadicIn || nIn == inputs.size()) &&
@@ -372,11 +360,9 @@ private:
   }
 
   template <typename T>
-  void ImportNodeMultipleOuts(
-      const onnx::NodeProto &node, int nIn, int nOut,
-      std::initializer_list<std::pair<std::string, AttrValueType>>
-          defaultAttrList,
-      bool variadicIn = false, bool variadicOut = false) {
+  void ImportNodeMultipleOuts(const onnx::NodeProto &node, int nIn, int nOut,
+                              bool variadicIn = false,
+                              bool variadicOut = false) {
     std::vector<mlir::Value> inputs;
     for (const auto &item : node.input()) {
       if (frontend_symbols_.ContainKey(legalize_name(item))) {
@@ -390,7 +376,7 @@ private:
           mlir::UnrankedTensorType::get(builder_.getF32Type()));
     }
 
-    auto attributes = ImportNodeAttributes(node, defaultAttrList);
+    auto attributes = ImportNodeAttributes(node);
 
     llvm::StringRef OpName = node.op_type();
 
@@ -413,9 +399,7 @@ private:
    * a specialized function is used
    */
   void
-  ImportNodeConv(onnx::NodeProto node, int nIn, int nOut,
-                 std::initializer_list<std::pair<std::string, AttrValueType>>
-                     defaultAttrList) {
+  ImportNodeConv(onnx::NodeProto node, int nIn, int nOut) {
     // Conv has attribute dilations, kernel_shape, pads, the default value of
     // which  is determined by the shape of first argument. However, since the
     // shape is unknown now, these attributes can be not generated auto
@@ -430,25 +414,23 @@ private:
 
     if (nOps == 2)
       ImportNodeOneOut<mlir::ONNXConvNoBiasOp>(
-          node, nOps, nOut, defaultAttrList);
+          node, nOps, nOut);
     else
-      ImportNodeOneOut<mlir::ONNXConvOp>(node, nOps, nOut, defaultAttrList);
+      ImportNodeOneOut<mlir::ONNXConvOp>(node, nOps, nOut);
   }
 
   /*!
    * Special handle for MaxPool operations.
    */
   void ImportNodeMaxPool(
-      onnx::NodeProto node, int nIn, int nOut,
-      std::initializer_list<std::pair<std::string, AttrValueType>>
-          defaultAttrList) {
+      onnx::NodeProto node, int nIn, int nOut) {
     int nOuts = node.output().size();
     if (nOuts == 1) {
       ImportNodeOneOut<mlir::ONNXMaxPoolSingleOutOp>(
-          node, nIn, nOuts, defaultAttrList);
+          node, nIn, nOuts);
     } else {
       ImportNodeMultipleOuts<mlir::ONNXMaxPoolOp>(
-          node, nIn, nOuts, defaultAttrList);
+          node, nIn, nOuts);
     }
   }
 

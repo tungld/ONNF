@@ -101,6 +101,8 @@ public:
         op->getName().getStringRef() != "onnx.LeakyRelu" &&
         op->getName().getStringRef() != "onnx.Selu" &&
         op->getName().getStringRef() != "onnx.Reciprocal" &&
+        op->getName().getStringRef() != "onnx.Softplus" &&
+        op->getName().getStringRef() != "onnx.Softsign" &&
         op->getName().getStringRef() != "onnx.Mul" &&
         op->getName().getStringRef() != "onnx.Add" &&
         op->getName().getStringRef() != "onnx.Div" &&
@@ -117,7 +119,8 @@ public:
         op->getName().getStringRef() != "onnx.GemmNoBias" &&
         op->getName().getStringRef() != "onnx.Reshape" &&
         op->getName().getStringRef() != "onnx.Transpose" &&
-        op->getName().getStringRef() != "onnx.Softmax")
+        op->getName().getStringRef() != "onnx.Softmax" &&
+        op->getName().getStringRef() != "onnx.ConvNoBias")
       return false;
     return llvm::any_of(op->getResultTypes(), [](Type result_type) {
       return !result_type.isa<RankedTensorType>();
