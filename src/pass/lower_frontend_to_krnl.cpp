@@ -1328,7 +1328,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     int64_t outRank = tensorOutType.getRank();
 
     // Get attributes
-    auto axisAttrs = op->getAttrOfType<ArrayAttr>("axes");
+    ArrayAttr axisAttrs = llvm::dyn_cast<ONNXReductionOp>(op).axesAttr();
     std::vector<int> axes;
     if (axisAttrs) {
       for (auto axisAttr : axisAttrs.getValue()) {
@@ -1344,8 +1344,9 @@ struct ONNXReductionOpLowering : public ConversionPattern {
       }
     }
     // KeepDims
-    int keepdimsAttr = op->getAttrOfType<IntegerAttr>("keepdims").getInt();
-    bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+    auto keepdims =
+        llvm::dyn_cast<ONNXReductionOp>(op).keepdims();
+    bool isKeepdims = (keepdims == 1) ? true : false;
 
     // Get type information
     auto memRefOutType = convertTensorToMemRef(tensorOutType);

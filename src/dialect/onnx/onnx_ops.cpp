@@ -575,7 +575,7 @@ void ONNXReduceMaxOp::inferShapes() {
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
   int rank = operandTy.getRank();
 
-  auto axisAttrs = getAttrOfType<ArrayAttr>("axes");
+  auto axisAttrs = axesAttr();
   std::vector<int> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
@@ -592,8 +592,7 @@ void ONNXReduceMaxOp::inferShapes() {
   }
 
   // KeepDims
-  int keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
-  bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+  bool isKeepdims = (keepdims() == 1) ? true : false;
 
   getResult().setType(getReductionType(operandTy, axes, isKeepdims));
 }
@@ -611,7 +610,7 @@ void ONNXReduceMinOp::inferShapes() {
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
   int rank = operandTy.getRank();
 
-  auto axisAttrs = getAttrOfType<ArrayAttr>("axes");
+  auto axisAttrs = axesAttr();
   std::vector<int> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
@@ -628,8 +627,7 @@ void ONNXReduceMinOp::inferShapes() {
   }
 
   // KeepDims
-  int keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
-  bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+  bool isKeepdims = (keepdims() == 1) ? true : false;
 
   getResult().setType(getReductionType(operandTy, axes, isKeepdims));
 }
@@ -647,7 +645,7 @@ void ONNXReduceProdOp::inferShapes() {
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
   int rank = operandTy.getRank();
 
-  auto axisAttrs = getAttrOfType<ArrayAttr>("axes");
+  auto axisAttrs = axesAttr();
   std::vector<int> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
@@ -664,8 +662,7 @@ void ONNXReduceProdOp::inferShapes() {
   }
 
   // KeepDims
-  int keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
-  bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+  bool isKeepdims = (keepdims() == 1) ? true : false;
 
   getResult().setType(getReductionType(operandTy, axes, isKeepdims));
 }
@@ -683,7 +680,7 @@ void ONNXReduceSumOp::inferShapes() {
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
   int rank = operandTy.getRank();
 
-  auto axisAttrs = getAttrOfType<ArrayAttr>("axes");
+  auto axisAttrs = axesAttr();
   std::vector<int> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
@@ -700,8 +697,7 @@ void ONNXReduceSumOp::inferShapes() {
   }
 
   // KeepDims
-  int keepdimsAttr = getAttrOfType<IntegerAttr>("keepdims").getInt();
-  bool isKeepdims = (keepdimsAttr == 1) ? true : false;
+  bool isKeepdims = (keepdims() == 1) ? true : false;
 
   getResult().setType(getReductionType(operandTy, axes, isKeepdims));
 }
