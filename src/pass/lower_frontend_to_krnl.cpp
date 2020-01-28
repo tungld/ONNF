@@ -1161,19 +1161,15 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     B = operands[1];
     C = operands[2];
 
-    IntegerAttr transAAttr = llvm::dyn_cast<ONNXGemmOp>(op).transAAttr();
-    IntegerAttr transBAttr = llvm::dyn_cast<ONNXGemmOp>(op).transBAttr();
-    bool isTransA = transAAttr ? (transAAttr.getInt() != 0) : false;
-    bool isTransB = transBAttr ? (transBAttr.getInt() != 0) : false;
-
-    FloatAttr alphaAttr = llvm::dyn_cast<ONNXGemmOp>(op).alphaAttr();
-    alphaAttr = alphaAttr ? alphaAttr
-                          : FloatAttr::get(tensorType.getElementType(), 1.0);
-    FloatAttr betaAttr = llvm::dyn_cast<ONNXGemmOp>(op).betaAttr();
-    betaAttr =
-        betaAttr ? betaAttr : FloatAttr::get(tensorType.getElementType(), 1.0);
+    auto alphaAttr = FloatAttr::get(tensorType.getElementType(),
+        llvm::dyn_cast<ONNXGemmOp>(op).alpha().convertToFloat());
+    auto betaAttr = FloatAttr::get(tensorType.getElementType(),
+        llvm::dyn_cast<ONNXGemmOp>(op).beta().convertToFloat());
     auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
     auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
+
+    bool isTransA = (llvm::dyn_cast<ONNXGemmOp>(op).transA() != 0);
+    bool isTransB = (llvm::dyn_cast<ONNXGemmOp>(op).transB() != 0);
 
     // Result type
     auto memRefType = convertTensorToMemRef(tensorType);

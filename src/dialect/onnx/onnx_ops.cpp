@@ -447,16 +447,12 @@ void ONNXGemmOp::inferShapes() {
     return;
   auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
   auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
-  IntegerAttr transAAttr = this->transAAttr();
-  IntegerAttr transBAttr = this->transBAttr();
-  int64_t transA = transAAttr ? transAAttr.getInt() : 0;
-  int64_t transB = transBAttr ? transBAttr.getInt() : 0;
 
   int64_t M, N, K_A, K_B;
-  M = (transA == 0) ? lhsTy.getShape()[0] : lhsTy.getShape()[1];
-  K_A = (transA == 0) ? lhsTy.getShape()[1] : lhsTy.getShape()[0];
-  N = (transB == 0) ? rhsTy.getShape()[1] : rhsTy.getShape()[0];
-  K_B = (transB == 0) ? rhsTy.getShape()[0] : rhsTy.getShape()[1];
+  M = (transA() == 0) ? lhsTy.getShape()[0] : lhsTy.getShape()[1];
+  K_A = (transA() == 0) ? lhsTy.getShape()[1] : lhsTy.getShape()[0];
+  N = (transB() == 0) ? rhsTy.getShape()[1] : rhsTy.getShape()[0];
+  K_B = (transB() == 0) ? rhsTy.getShape()[0] : rhsTy.getShape()[1];
 
   if ((K_A != -1) and (K_B != -1) and (K_A != K_B)) {
     emitError("Tensor shapes mismatched.");
