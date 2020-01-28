@@ -62,19 +62,19 @@ struct ReduceL1OpPattern : public RewritePattern {
       SmallVector<Value, 4> values;
       SmallVector<NamedAttribute, 4> attrs;
       SmallVector<Type, 4> types;
-      values.push_back((*absOp.getODSResults(0).begin()));
+      values.emplace_back((*absOp.getODSResults(0).begin()));
       for (auto attr : opODS_Attrs) {
-        attrs.push_back(attr);
+        attrs.emplace_back(attr);
       }
       for (auto v : opODS_Y) {
-        types.push_back(v.getType());
+        types.emplace_back(v.getType());
       }
       sumOp = rewriter.create<ONNXReduceSumOp>(loc, types, values, attrs);
     }
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{sumOp.getODSResults(0)}) {
-      values.push_back(v);
+      values.emplace_back(v);
     }
     rewriter.replaceOp(op, values);
     return matchSuccess();
@@ -114,7 +114,7 @@ struct ReduceL2OpPattern : public RewritePattern {
     {
       SmallVector<Type, 4> types;
       for (auto v : opODS_Y) {
-        types.push_back(v.getType());
+        types.emplace_back(v.getType());
       }
       sqrtOp = rewriter.create<ONNXSqrtOp>(
           loc, types, (*sumSquareOp.getODSResults(0).begin()));
@@ -122,7 +122,7 @@ struct ReduceL2OpPattern : public RewritePattern {
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{sqrtOp.getODSResults(0)}) {
-      values.push_back(v);
+      values.emplace_back(v);
     }
     rewriter.replaceOp(op, values);
     return matchSuccess();
@@ -162,7 +162,7 @@ struct ReduceLogSumOpPattern : public RewritePattern {
     {
       SmallVector<Type, 4> types;
       for (auto v : opODS_Y) {
-        types.push_back(v.getType());
+        types.emplace_back(v.getType());
       }
       logOp = rewriter.create<ONNXLogOp>(loc, types,
                                          (*sumOp.getODSResults(0).begin()));
@@ -170,7 +170,7 @@ struct ReduceLogSumOpPattern : public RewritePattern {
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{logOp.getODSResults(0)}) {
-      values.push_back(v);
+      values.emplace_back(v);
     }
     rewriter.replaceOp(op, values);
     return matchSuccess();
@@ -211,19 +211,19 @@ struct ReduceLogSumExpOpPattern : public RewritePattern {
       SmallVector<Value, 4> values;
       SmallVector<NamedAttribute, 4> attrs;
       SmallVector<Type, 4> types;
-      values.push_back((*expOp.getODSResults(0).begin()));
+      values.emplace_back((*expOp.getODSResults(0).begin()));
       for (auto attr : opODS_Attrs) {
-        attrs.push_back(attr);
+        attrs.emplace_back(attr);
       }
       for (auto v : opODS_Y) {
-        types.push_back(v.getType());
+        types.emplace_back(v.getType());
       }
       logSumOp = rewriter.create<ONNXReduceLogSumOp>(loc, types, values, attrs);
     }
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{logSumOp.getODSResults(0)}) {
-      values.push_back(v);
+      values.emplace_back(v);
     }
     rewriter.replaceOp(op, values);
     return matchSuccess();
@@ -264,19 +264,19 @@ struct ReduceSumSquareOpPattern : public RewritePattern {
       SmallVector<Value, 4> values;
       SmallVector<NamedAttribute, 4> attrs;
       SmallVector<Type, 4> types;
-      values.push_back((*mulOp.getODSResults(0).begin()));
+      values.emplace_back((*mulOp.getODSResults(0).begin()));
       for (auto attr : opODS_Attrs) {
-        attrs.push_back(attr);
+        attrs.emplace_back(attr);
       }
       for (auto v : opODS_Y) {
-        types.push_back(v.getType());
+        types.emplace_back(v.getType());
       }
       sumOp = rewriter.create<ONNXReduceSumOp>(loc, types, values, attrs);
     }
 
     SmallVector<Value, 4> values;
     for (auto v : SmallVector<Value, 4>{sumOp.getODSResults(0)}) {
-      values.push_back(v);
+      values.emplace_back(v);
     }
     rewriter.replaceOp(op, values);
     return matchSuccess();
