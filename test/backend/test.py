@@ -144,14 +144,14 @@ test_to_enable = [
     #"test_sum_two_inputs_cpu", <- error
 
     # Unsqueeze Op:
-    #"test_unsqueeze_axis_0_cpu",
-    #"test_unsqueeze_axis_1_cpu",
-    #"test_unsqueeze_axis_2_cpu",
-    #"test_unsqueeze_axis_3_cpu",
-    #"test_unsqueeze_negative_axes_cpu",
-    #"test_unsqueeze_three_axes_cpu",
-    #"test_unsqueeze_two_axes_cpu",
-    #"test_unsqueeze_unsorted_axes_cpu",
+    "test_unsqueeze_axis_0_cpu",
+    "test_unsqueeze_axis_1_cpu",
+    "test_unsqueeze_axis_2_cpu",
+    "test_unsqueeze_axis_3_cpu",
+    "test_unsqueeze_negative_axes_cpu",
+    "test_unsqueeze_three_axes_cpu",
+    "test_unsqueeze_two_axes_cpu",
+    "test_unsqueeze_unsorted_axes_cpu",
 
     # Reciprocal Op:
     "test_reciprocal_cpu",
