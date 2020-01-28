@@ -325,6 +325,7 @@ Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
 // the same category, e.g. element-wise operators will belong to the elementwise
 // category.
 #include "src/pass/lower_frontend_to_krnl/math/elementwise.inc"
+#include "src/pass/lower_frontend_to_krnl/math/softmax.inc"
 #include "src/pass/lower_frontend_to_krnl/tensor/reshape.inc"
 
 //===----------------------------------------------------------------------===//
@@ -430,6 +431,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
   // Frontent operation lowering.
   populateLoweringONNXElementwiseOpPattern(patterns, &getContext());
   populateLoweringONNXReshapeOpPattern(patterns, &getContext());
+  populateLoweringONNXSoftmaxOpPattern(patterns, &getContext());
   patterns.insert<ONNXEntryPointLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
