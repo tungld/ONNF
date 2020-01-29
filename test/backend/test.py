@@ -104,14 +104,14 @@ test_to_enable = [
     "test_leakyrelu_example_cpu",
 
     # Max Op:
-    # "test_max_example_cpu", <- error
+    "test_max_example_cpu",
     "test_max_one_input_cpu",
-    # "test_max_two_inputs_cpu", <- error
+    "test_max_two_inputs_cpu",
 
     # Min Op:
-    # "test_min_example_cpu", <- error
+    "test_min_example_cpu",
     "test_min_one_input_cpu",
-    # "test_min_two_inputs_cpu", <- error
+    "test_min_two_inputs_cpu",
 
     # Mul Op:
     "test_mul_cpu",
@@ -138,10 +138,14 @@ test_to_enable = [
     "test_softmax_example_cpu",
     "test_softmax_large_number_cpu",
 
+    # Sqrt Op:
+    "test_sqrt_cpu",
+    "test_sqrt_example_cpu",
+
     # Sum Op:
-    #"test_sum_example_cpu", <- error
+    "test_sum_example_cpu",
     "test_sum_one_input_cpu",
-    #"test_sum_two_inputs_cpu", <- error
+    "test_sum_two_inputs_cpu",
 
     # Unsqueeze Op:
     "test_unsqueeze_axis_0_cpu",
@@ -164,6 +168,9 @@ test_to_enable = [
     # SoftsignOp:
     "test_softsign_cpu",
     "test_softsign_example_cpu",
+
+    # ReshapeOp:
+    "test_reshape_reordered_all_dims_cpu",
 ]
 
 # Extract name of all test cases.
