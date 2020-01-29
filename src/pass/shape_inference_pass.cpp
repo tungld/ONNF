@@ -113,6 +113,7 @@ public:
         op->getName().getStringRef() != "onnx.Sum" &&
         op->getName().getStringRef() != "onnx.Max" &&
         op->getName().getStringRef() != "onnx.Min" &&
+        op->getName().getStringRef() != "onnx.Pow" &&
         op->getName().getStringRef() != "onnx.Identity" &&
         op->getName().getStringRef() != "onnx.MatMul" &&
         op->getName().getStringRef() != "onnx.Gemm" &&

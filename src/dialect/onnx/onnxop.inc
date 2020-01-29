@@ -1971,7 +1971,7 @@ def ONNXPadOp:ONNX_Op<"Pad",
 }
 
 def ONNXPowOp:ONNX_Op<"Pow", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX Pow operation";
   let description = [{
     "Pow takes input data (Tensor<T>) and exponent Tensor, and"

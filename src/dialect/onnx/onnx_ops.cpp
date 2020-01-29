@@ -335,6 +335,19 @@ void ONNXMinOp::inferShapes() {
 }
 
 //===----------------------------------------------------------------------===//
+// Pow
+/// Infer the output shape of the ONNXPowOp. This method is required by the
+/// shape inference interface.
+void ONNXPowOp::inferShapes() {
+  if (!getOperand(0).getType().isa<RankedTensorType>() ||
+      !getOperand(1).getType().isa<RankedTensorType>())
+    return;
+  auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
+  auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
+  getResult().setType(getBroadcastedType(lhsTy, rhsTy));
+}
+
+//===----------------------------------------------------------------------===//
 // Identity
 /// Infer the output shape of the ONNXIdentityOp. This method is required by the
 /// shape inference interface.
