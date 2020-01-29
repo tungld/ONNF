@@ -692,6 +692,9 @@ void ONNXConvNoBiasOp::inferShapes() {
 // Unsqueeze
 
 void ONNXUnsqueezeOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>())
+    return;
+
   auto operandTy = getOperand().getType().cast<RankedTensorType>();
   int inRank = operandTy.getRank();
 
@@ -717,9 +720,9 @@ void ONNXUnsqueezeOp::inferShapes() {
   SmallVector<int64_t, 4> dims;
   for (int i = 0, j = 0; i < outRank || j < inRank; ++i) {
     if (std::find(axes.begin(), axes.end(), i) != axes.end()) {
-      dims.push_back(1);
+      dims.emplace_back(1);
     } else {
-      dims.push_back(operandTy.getShape()[j++]);
+      dims.emplace_back(operandTy.getShape()[j++]);
     }
   }
   getResult().setType(RankedTensorType::get(dims, operandTy.getElementType()));
