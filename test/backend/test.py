@@ -160,6 +160,16 @@ test_to_enable = [
     "test_sum_one_input_cpu",
     "test_sum_two_inputs_cpu",
 
+    # Unsqueeze Op:
+    "test_unsqueeze_axis_0_cpu",
+    "test_unsqueeze_axis_1_cpu",
+    "test_unsqueeze_axis_2_cpu",
+    "test_unsqueeze_axis_3_cpu",
+    "test_unsqueeze_negative_axes_cpu",
+    "test_unsqueeze_three_axes_cpu",
+    "test_unsqueeze_two_axes_cpu",
+    "test_unsqueeze_unsorted_axes_cpu",
+
     # Reciprocal Op:
     "test_reciprocal_cpu",
     "test_reciprocal_example_cpu",
@@ -173,7 +183,15 @@ test_to_enable = [
     "test_softsign_example_cpu",
 
     # ReshapeOp:
+    "test_reshape_extended_dims_cpu",
+    #"test_reshape_negative_dim_cpu", <- handle nagative dim
+    #"test_reshape_negative_extended_dims_cpu", <- handle nagative dim
+    "test_reshape_one_dim_cpu",
+    "test_reshape_reduced_dims_cpu",
     "test_reshape_reordered_all_dims_cpu",
+    "test_reshape_reordered_last_dims_cpu",
+    #"test_reshape_zero_and_negative_dim_cpu", <- handle nagative dim
+    "test_reshape_zero_dim_cpu",
 ]
 
 # Extract name of all test cases.

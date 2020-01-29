@@ -371,6 +371,42 @@ void ONNXMatMulOp::inferShapes() {
         lhsShape[0] != rhsShape[0])
       emitError("Attempt to multiply incompatible matrices.");
     dims.emplace_back(1);
+  } else if (lhsShape.size() == 1 && rhsShape.size() >= 2) {
+    // If the first argument is 1-D, it is promoted to a matrix by prepending a
+    // 1 to its dimensions. After matrix multiplication the prepended 1 is
+    // removed.
+    //
+    // N MATMUL (s1 x s2 x... x sK x N x P)
+    // =>
+    // (s1 x s2 x... x sK x P)
+
+    // Check legality of matrix multiplication.
+    unsigned rhsRank = rhsShape.size();
+    if (lhsShape[0] != -1 && rhsShape[rhsRank - 2] != -1 &&
+        lhsShape[0] != rhsShape[rhsRank - 2])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    for (int i = 0; i < rhsRank - 2; ++i)
+      dims.emplace_back(rhsShape[i]);
+    dims.emplace_back(rhsShape[rhsRank - 1]);
+  } else if (lhsShape.size() >= 2 && rhsShape.size() == 1) {
+    // If the second argument is 1-D, it is promoted to a matrix by appending a
+    // 1 to its dimensions. After matrix multiplication the appended 1 is
+    // removed.
+    //
+    // (s1 x s2 x... x sK x M x N) MATMUL N
+    // =>
+    // (s1 x s2 x... x sK x M)
+
+    // Check legality of matrix multiplication.
+    unsigned lhsRank = lhsShape.size();
+    if (lhsShape[lhsRank - 1] != -1 && rhsShape[0] != -1 &&
+        lhsShape[lhsRank - 1] != rhsShape[0])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    for (int i = 0; i < lhsRank - 2; ++i)
+      dims.emplace_back(lhsShape[i]);
+    dims.emplace_back(lhsShape[lhsRank - 2]);
   } else if (lhsShape.size() > 2 && rhsShape.size() == 2) {
     // (s1 x s2 x... x sK x M x N) MATMUL (N x P)
     // =>
@@ -710,6 +746,46 @@ void ONNXConvNoBiasOp::inferShapes() {
 
   dims.append(outSpatialDims.begin(), outSpatialDims.end());
   getResult().setType(RankedTensorType::get(dims, dataTy.getElementType()));
+}
+
+//===----------------------------------------------------------------------===//
+// Unsqueeze
+
+void ONNXUnsqueezeOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>())
+    return;
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  int inRank = operandTy.getRank();
+
+  ArrayAttr axisAttrs = axesAttr();
+  SmallVector<int, 4> axes;
+  int outRank = 0;
+  if (axisAttrs) {
+    outRank = inRank + axisAttrs.getValue().size();
+    for (auto axisAttr : axisAttrs.getValue()) {
+      int axis = axisAttr.cast<IntegerAttr>().getInt();
+      axis = axis >= 0 ? axis : (outRank + axis);
+      // Valid range
+      assert(axis >= -outRank && axis <= outRank - 1);
+      if (std::find(axes.begin(), axes.end(), axis) == axes.end())
+        axes.emplace_back(axis);
+      else
+        emitError("Duplicated axes.");
+    }
+  } else {
+    emitError("Axes attribute is required.");
+  }
+
+  SmallVector<int64_t, 4> dims;
+  for (int i = 0, j = 0; i < outRank || j < inRank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end()) {
+      dims.emplace_back(1);
+    } else {
+      dims.emplace_back(operandTy.getShape()[j++]);
+    }
+  }
+  getResult().setType(RankedTensorType::get(dims, operandTy.getElementType()));
 }
 
 //===----------------------------------------------------------------------===//
