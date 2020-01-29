@@ -696,7 +696,7 @@ void ONNXUnsqueezeOp::inferShapes() {
   int inRank = operandTy.getRank();
 
   ArrayAttr axisAttrs = axesAttr();
-  std::vector<int> axes;
+  SmallVector<int, 4> axes;
   int outRank = 0;
   if (axisAttrs) {
     outRank = inRank + axisAttrs.getValue().size();
@@ -706,13 +706,12 @@ void ONNXUnsqueezeOp::inferShapes() {
       // Valid range
       assert(axis >= -outRank && axis <= outRank - 1);
       if (std::find(axes.begin(), axes.end(), axis) == axes.end())
-        axes.push_back(axis);
+        axes.emplace_back(axis);
       else
         emitError("Duplicated axes.");
     }
   } else {
     emitError("Axes attribute is required.");
-    return;
   }
 
   SmallVector<int64_t, 4> dims;
