@@ -304,6 +304,12 @@ struct ScalarOp<ONNXLogOp> {
   using IOp = LogOp; // not use
 };
 
+template <>
+struct ScalarOp<ONNXSqrtOp> {
+  using FOp = KrnlSqrtOp;
+  using IOp = KrnlSqrtOp; // not use
+};
+
 template <typename ElementwiseNaryOp>
 using ScalarFOp = typename ScalarOp<ElementwiseNaryOp>::FOp;
 template <typename ElementwiseNaryOp>
@@ -1480,6 +1486,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseUnaryOpLowering<mlir::ONNXReciprocalOp>,
                   ONNXElementwiseUnaryOpLowering<mlir::ONNXSoftplusOp>,
                   ONNXElementwiseUnaryOpLowering<mlir::ONNXSoftsignOp>,
+                  ONNXElementwiseUnaryOpLowering<mlir::ONNXSqrtOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXAddOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMulOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXDivOp>,

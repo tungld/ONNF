@@ -183,6 +183,14 @@ void ONNXSoftsignOp::inferShapes() {
 }
 
 //===----------------------------------------------------------------------===//
+// Sqrt
+/// Infer the output shape of the ONNXSqrtOp. This method is required by
+/// the shape inference interface.
+void ONNXSqrtOp::inferShapes() {
+  getResult().setType(getOperand().getType());
+}
+
+//===----------------------------------------------------------------------===//
 // Add
 /// Infer the output shape of the ONNXAddOp. This method is required by the
 /// shape inference interface.
@@ -458,7 +466,6 @@ void ONNXGemmOp::inferShapes() {
 
   if ((K_A != -1) and (K_B != -1) and (K_A != K_B)) {
     emitError("Tensor shapes mismatched.");
-    return;
   }
 
   // Check whether bias is unidirectional broadcasting or not.
@@ -470,7 +477,6 @@ void ONNXGemmOp::inferShapes() {
       (rank == 2 && shape[rank - 2] != -1 && M != -1 && M != shape[rank - 2] &&
        shape[rank - 2] != 1)) {
     emitError("Bias shape mismatched.");
-    return;
   }
 
   SmallVector<int64_t, 2> dims;
