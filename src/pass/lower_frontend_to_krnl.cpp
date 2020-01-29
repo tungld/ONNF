@@ -1157,6 +1157,123 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   }
 };
 
+struct ONNXMatMulOpLowering : public ConversionPattern {
+  ONNXMatMulOpLowering(MLIRContext *ctx)
+      : ConversionPattern(mlir::ONNXMatMulOp::getOperationName(), 1, ctx) {}
+
+  PatternMatchResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+    auto loc = op->getLoc();
+
+    Value A = operands[0];
+    Value B = operands[1];
+    auto AShape = A.getType().cast<MemRefType>().getShape();
+    auto BShape = B.getType().cast<MemRefType>().getShape();
+
+    // Result type
+    auto memRefType = convertTensorToMemRef(tensorType);
+
+    // Insert an allocation and deallocation for the result of this operation.
+    Value alloc;
+    bool insertDealloc = checkInsertDealloc(op);
+    if (hasAllConstantDimensions(memRefType))
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
+    else {
+      auto memRefShape = memRefType.getShape();
+      SmallVector<Value, 4> allocOperands;
+      if (AShape.size() == 1 && BShape.size() == 1) {
+        // Both arguments are 1-D
+        if (memRefShape[0] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, A, 0);
+          allocOperands.emplace_back(dim);
+        }
+      } else if (AShape.size() > 2 && BShape.size() > 2) {
+        // Both arguments are N-D, N > 2
+        for (int i = 0; i < memRefShape.size() - 2; ++i) {
+          if (memRefShape[i] < 0) {
+            auto dim = rewriter.create<DimOp>(loc, A, i);
+            allocOperands.emplace_back(dim);
+          }
+        }
+        if (memRefShape[memRefShape.size() - 2] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, A, memRefShape.size() - 2);
+          allocOperands.emplace_back(dim);
+        }
+        if (memRefShape[memRefShape.size() - 1] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, B, memRefShape.size() - 1);
+          allocOperands.emplace_back(dim);
+        }
+      } else if (AShape.size() == 2 && BShape.size() > 2) {
+        //  Either argument is N-D, N > 2
+        for (int i = 0; i < memRefShape.size() - 2; ++i) {
+          if (memRefShape[i] < 0) {
+            auto dim = rewriter.create<DimOp>(loc, B, i);
+            allocOperands.emplace_back(dim);
+          }
+        }
+        if (memRefShape[memRefShape.size() - 2] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, A, memRefShape.size() - 2);
+          allocOperands.emplace_back(dim);
+        }
+        if (memRefShape[memRefShape.size() - 1] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, B, memRefShape.size() - 1);
+          allocOperands.emplace_back(dim);
+        }
+      } else if (AShape.size() > 2 && BShape.size() == 2) {
+        //  Either argument is N-D, N > 2
+        for (int i = 0; i < memRefShape.size() - 2; ++i) {
+          if (memRefShape[i] < 0) {
+            auto dim = rewriter.create<DimOp>(loc, A, i);
+            allocOperands.emplace_back(dim);
+          }
+        }
+        if (memRefShape[memRefShape.size() - 2] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, A, memRefShape.size() - 2);
+          allocOperands.emplace_back(dim);
+        }
+        if (memRefShape[memRefShape.size() - 1] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, B, memRefShape.size() - 1);
+          allocOperands.emplace_back(dim);
+        }
+      } else if (AShape.size() == 1 && BShape.size() >= 2) {
+        //  Either argument is 1-D
+        for (int i = 0; i < memRefShape.size() - 1; ++i) {
+          if (memRefShape[i] < 0) {
+            auto dim = rewriter.create<DimOp>(loc, B, i);
+            allocOperands.emplace_back(dim);
+          }
+        }
+        if (memRefShape[memRefShape.size() - 1] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, B, BShape.size() - 1);
+          allocOperands.emplace_back(dim);
+        }
+      } else if (AShape.size() >= 2 && BShape.size() == 1) {
+        //  Either argument is 1-D
+        for (int i = 0; i < memRefShape.size() - 1; ++i) {
+          if (memRefShape[i] < 0) {
+            auto dim = rewriter.create<DimOp>(loc, A, i);
+            allocOperands.emplace_back(dim);
+          }
+        }
+        if (memRefShape[memRefShape.size() - 1] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, A, AShape.size() - 2);
+          allocOperands.emplace_back(dim);
+        }
+      } else {
+        emitError(loc, "Invalid shapes");
+      }
+
+      alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
+    }
+
+    rewriter.replaceOp(op, alloc);
+
+    return matchSuccess();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
 //===----------------------------------------------------------------------===//
@@ -1285,7 +1402,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMaxOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMinOp>,
                   ONNXReshapeOpLowering, ONNXEntryPointLowering,
-                  ONNXSoftmaxOpLowering>(&getContext());
+                  ONNXSoftmaxOpLowering, ONNXMatMulOpLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`
