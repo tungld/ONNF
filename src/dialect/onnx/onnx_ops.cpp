@@ -32,21 +32,21 @@ RankedTensorType getReductionType(RankedTensorType operandTy,
   int64_t rank = operandTy.getRank();
 
   // Mark reduction axes.
-  std::vector<bool> isReductionAxis;
+  SmallVector<bool, 4> isReductionAxis;
   for (int i = 0; i < rank; ++i) {
     if (std::find(axes.begin(), axes.end(), i) != axes.end())
-      isReductionAxis.push_back(true);
+      isReductionAxis.emplace_back(true);
     else
-      isReductionAxis.push_back(false);
+      isReductionAxis.emplace_back(false);
   }
 
   SmallVector<int64_t, 4> dims;
   for (int i = 0; i < rank; ++i) {
     if (isReductionAxis[i]) {
       if (keepdims)
-        dims.push_back(1); // reduction dimension
+        dims.emplace_back(1); // reduction dimension
     } else {
-      dims.push_back(operandTy.getShape()[i]);
+      dims.emplace_back(operandTy.getShape()[i]);
     }
   }
 
@@ -644,18 +644,18 @@ void ONNXReduceMaxOp::inferShapes() {
   int rank = operandTy.getRank();
 
   auto axisAttrs = axesAttr();
-  std::vector<int> axes;
+  SmallVector<int, 4> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
       int axis = axisAttr.cast<IntegerAttr>().getInt();
       axis = axis >= 0 ? axis : (rank + axis);
       assert(axis >= -rank && axis <= rank - 1);
       if (std::find(axes.begin(), axes.end(), axis) == axes.end())
-        axes.push_back(axis);
+        axes.emplace_back(axis);
     }
   } else {
     for (int i = 0; i < rank; ++i) {
-      axes.push_back(i);
+      axes.emplace_back(i);
     }
   }
 
@@ -679,18 +679,18 @@ void ONNXReduceMinOp::inferShapes() {
   int rank = operandTy.getRank();
 
   auto axisAttrs = axesAttr();
-  std::vector<int> axes;
+  SmallVector<int, 4> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
       int axis = axisAttr.cast<IntegerAttr>().getInt();
       axis = axis >= 0 ? axis : (rank + axis);
       assert(axis >= -rank && axis <= rank - 1);
       if (std::find(axes.begin(), axes.end(), axis) == axes.end())
-        axes.push_back(axis);
+        axes.emplace_back(axis);
     }
   } else {
     for (int i = 0; i < rank; ++i) {
-      axes.push_back(i);
+      axes.emplace_back(i);
     }
   }
 
@@ -714,18 +714,18 @@ void ONNXReduceProdOp::inferShapes() {
   int rank = operandTy.getRank();
 
   auto axisAttrs = axesAttr();
-  std::vector<int> axes;
+  SmallVector<int, 4> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
       int axis = axisAttr.cast<IntegerAttr>().getInt();
       axis = axis >= 0 ? axis : (rank + axis);
       assert(axis >= -rank && axis <= rank - 1);
       if (std::find(axes.begin(), axes.end(), axis) == axes.end())
-        axes.push_back(axis);
+        axes.emplace_back(axis);
     }
   } else {
     for (int i = 0; i < rank; ++i) {
-      axes.push_back(i);
+      axes.emplace_back(i);
     }
   }
 
@@ -749,18 +749,18 @@ void ONNXReduceSumOp::inferShapes() {
   int rank = operandTy.getRank();
 
   auto axisAttrs = axesAttr();
-  std::vector<int> axes;
+  SmallVector<int, 4> axes;
   if (axisAttrs) {
     for (auto axisAttr : axisAttrs.getValue()) {
       int axis = axisAttr.cast<IntegerAttr>().getInt();
       axis = axis >= 0 ? axis : (rank + axis);
       assert(axis >= -rank && axis <= rank - 1);
       if (std::find(axes.begin(), axes.end(), axis) == axes.end())
-        axes.push_back(axis);
+        axes.emplace_back(axis);
     }
   } else {
     for (int i = 0; i < rank; ++i) {
-      axes.push_back(i);
+      axes.emplace_back(i);
     }
   }
 
