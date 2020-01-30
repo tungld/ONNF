@@ -229,46 +229,46 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
 
 // Create an iterate operand pack for KrnlIterateOp
 KrnlIterateOperandPack createIterateOperandPack(Location loc,
-    PatternRewriter &rewriter, KrnlDefineLoopsOp krnlLoopsOp,
-    KrnlOptimizeLoopsOp krnlOptimizedLoopsOp, ArrayRef<int64_t> memRefShape,
+    PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
+    KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
     Value operand, ArrayRef<int> axes = {}) {
-  // If `axes` is given, only iterate along those axes. By default iterating
-  // along all dimensions. `axes` is a list of non-duplicated ints. Negative
+  // If `axes` is given, only iterate along those axes. By default, iterating
+  // along all axes. `axes` is a list of non-duplicated ints. Negative
   // axis is supported.
   //
 
-  // Rank
+  auto loopsOpResult = loopsOp.getResults();
+  auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
+
+  // Number of induction variables.
+  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+  assert((numIVs <= loopsOpResult.size()) && "Invalid axes");
+
+  // Create a sorted vector of axes.
   SmallVector<int, 4> sortedAxes;
-  int rank;
   if (axes.empty()) {
-    rank =  memRefShape.size();
-    for (int i = 0; i < rank; ++i) {
+    for (int i = 0; i < numIVs; ++i) {
       sortedAxes.emplace_back(i);
     }
   } else {
-    rank = axes.size();
-    for (int i = 0; i < rank; ++i) {
-      int axis = axes[i] >= 0 ? axes[i] : (rank + axes[i]);
+    for (int i = 0; i < numIVs; ++i) {
+      int axis = axes[i] >= 0 ? axes[i] : (numIVs + axes[i]);
+      assert((axis < loopsOpResult.size()) && "Invalid axis");
       sortedAxes.emplace_back(axis);
     }
     std::sort(sortedAxes.begin(), sortedAxes.end());
   }
 
-  auto krnlLoopsOpResult = krnlLoopsOp.getResults();
-  auto krnlOptimizedLoopsOpResult = krnlOptimizedLoopsOp.getResults();
-
-  std::vector<Value> originalLoops;
-  originalLoops.reserve(rank);
+  // Create vectors of induction variables.
+  std::vector<Value> originalLoops, optimizedLoops;
+  originalLoops.reserve(numIVs);
+  optimizedLoops.reserve(numIVs);
   for (int i : sortedAxes) {
-    originalLoops.push_back(krnlLoopsOpResult[i]);
+    originalLoops.push_back(loopsOpResult[i]);
+    optimizedLoops.push_back(optimizedLoopsOpResult[i]);
   }
 
-  std::vector<Value> optimizedLoops;
-  optimizedLoops.reserve(rank);
-  for (int i : sortedAxes) {
-    optimizedLoops.push_back(krnlOptimizedLoopsOpResult[i]);
-  }
-
+  // Create an operand pack.
   KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
   for (int i : sortedAxes) {
     if (memRefShape[i] < 0) {
@@ -291,31 +291,26 @@ KrnlIterateOp insertFullKrnlIterateOp(Location loc, PatternRewriter &rewriter,
                                       Value operand, ArrayRef<int> axes = {}) {
   // If a dimension is unknown, get its value of a corresponding given operand.
   //
-  // If `axes` is given, only iterate along those axes. By default iterating
-  // along all dimensions. `axes` is a list of non-duplicated ints. Negative
+  // If `axes` is given, only iterate along those axes. By default, iterating
+  // along all axes. `axes` is a list of non-duplicated ints. Negative
   // axis is supported.
   //
   // There is no optimization in the KrnlOptimizeLoopsOp.
 
-  KrnlIterateOp iterateOp;
-
-  // Number of induction variables
+  // Number of induction variables.
   int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+
   // Define loops.
   auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
   // Define loop optimization.
   auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
-  Block &optimizationBlock = optimizedLoopsOp.region().front();
+  // Create a KrnlIterateOp
+  KrnlIterateOp iterateOp = rewriter.create<KrnlIterateOp>(
+      loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                    memRefShape, operand, axes));
 
-  KrnlIterateOperandPack pack = createIterateOperandPack(
-      loc, rewriter, loopsOp, optimizedLoopsOp, memRefShape, operand, axes);
-
-  iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
-
-  // Insert any optimizations in the KrnlOptimizeLoopsOp body.
-  rewriter.setInsertionPointToEnd(&optimizationBlock);
-  // Return from KrnlOptimizeLoopsOp body.
-  // When no optimizations are present we just return the loops unchaged.
+  // No optimization
+  rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
   rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
   rewriter.setInsertionPointAfter(iterateOp);
 
