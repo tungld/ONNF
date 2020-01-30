@@ -284,11 +284,12 @@ KrnlIterateOperandPack createIterateOperandPack(Location loc,
   return pack;
 }
 
-// Insert KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
+// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
 // iterating along the given MemRefType's dimensions.
-KrnlIterateOp insertFullKrnlIterateOp(Location loc, PatternRewriter &rewriter,
-                                      ArrayRef<int64_t> memRefShape,
-                                      Value operand, ArrayRef<int> axes = {}) {
+std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
+insertKrnlOps(Location loc, PatternRewriter &rewriter,
+              ArrayRef<int64_t> memRefShape, Value operand,
+              ArrayRef<int> axes = {}, bool includeIterateOp = true) {
   // If a dimension is unknown, get its value of a corresponding given operand.
   //
   // If `axes` is given, only iterate along those axes. By default, iterating
@@ -305,16 +306,21 @@ KrnlIterateOp insertFullKrnlIterateOp(Location loc, PatternRewriter &rewriter,
   // Define loop optimization.
   auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
   // Create a KrnlIterateOp
-  KrnlIterateOp iterateOp = rewriter.create<KrnlIterateOp>(
-      loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                    memRefShape, operand, axes));
+  KrnlIterateOp iterateOp;
+  if (includeIterateOp)
+    iterateOp = rewriter.create<KrnlIterateOp>(
+        loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                      memRefShape, operand, axes));
 
   // No optimization
   rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
   rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
-  rewriter.setInsertionPointAfter(iterateOp);
+  if (includeIterateOp)
+    rewriter.setInsertionPointAfter(iterateOp);
+  else
+    rewriter.setInsertionPointAfter(optimizedLoopsOp);
 
-  return iterateOp;
+  return std::make_tuple(loopsOp, optimizedLoopsOp, iterateOp);
 }
 
 namespace {
@@ -785,8 +791,8 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
     auto memRefShape = memRefType.getShape();
     int64_t rank = memRefShape.size();
 
-    auto iterateOp =
-        insertFullKrnlIterateOp(loc, rewriter, memRefShape, operands[0]);
+    KrnlIterateOp iterateOp =
+        std::get<2>(insertKrnlOps(loc, rewriter, memRefShape, operands[0]));
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Insert instructions inside the KrnlIterateOp body.
@@ -850,7 +856,8 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
         getBroadcastedDimInfo(loc, rewriter, memRefType, operands);
 
     // Create a KrnlIterateOp.
-    auto iterateOp = insertFullKrnlIterateOp(loc, rewriter, memRefShape, alloc);
+    KrnlIterateOp iterateOp =
+        std::get<2>(insertKrnlOps(loc, rewriter, memRefShape, alloc));
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Insert instructions inside the KrnlIterateOp body.
@@ -926,10 +933,10 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
         FloatAttr::get(elementType, -std::numeric_limits<float>::infinity()));
 
     // Define loops.
-    auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
-    // Define loop optimization.
-    auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
-    Block &optimizationBlock = optimizedLoopsOp.region().front();
+    auto krnlOps = insertKrnlOps(loc, rewriter, memRefShape, operands[0], {},
+                                 /*includeIterate*/ false);
+    KrnlDefineLoopsOp loopsOp = std::get<0>(krnlOps);
+    KrnlOptimizeLoopsOp optimizedLoopsOp = std::get<1>(krnlOps);
 
     // Coerce the input into a 2-D tensor. `axis` will be the coercing point.
     // This coercing follows the softmax definition in ONNX:
@@ -955,11 +962,6 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     SmallVector<Value, 4> outerLoopIVs;
     if (axis != 0) {
       outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
-
-      // No optimization
-      rewriter.setInsertionPointToEnd(&optimizationBlock);
-      rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
-      rewriter.setInsertionPoint(optimizedLoopsOp);
 
       // Insert instructions inside the outer loop.
       Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
@@ -988,11 +990,6 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
       sumIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
       // Create an inner loop to compute softmax.
       softmaxIterateOp = rewriter.create<KrnlIterateOp>(loc, innerPack);
-
-      // No optimization
-      rewriter.setInsertionPointToEnd(&optimizationBlock);
-      rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
-      rewriter.setInsertionPoint(optimizedLoopsOp);
     }
 
     // Insert instructions inside the max loop.
@@ -1206,7 +1203,10 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numLoops);
     // Define loop optimization.
     auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numLoops);
-    Block &optimizationBlock = optimizedLoopsOp.region().front();
+    // No optimization
+    rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
+    rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
+    rewriter.setInsertionPointAfter(optimizedLoopsOp);
 
     // We have two Krnl loops:
     // - Outer loop iterates over the output matrix dimensions, and
@@ -1252,14 +1252,6 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     }
 
     auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
-
-    // Now perform the insertions into the body of the
-    // just generated instructions:
-
-    // No optimization
-    rewriter.setInsertionPointToEnd(&optimizationBlock);
-    rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
-    rewriter.setInsertionPoint(optimizedLoopsOp);
 
     // Insert instructions inside the outer loop.
     Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
