@@ -227,6 +227,101 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
+// Create an iterate operand pack for KrnlIterateOp
+KrnlIterateOperandPack createIterateOperandPack(Location loc,
+    PatternRewriter &rewriter, KrnlDefineLoopsOp krnlLoopsOp,
+    KrnlOptimizeLoopsOp krnlOptimizedLoopsOp, ArrayRef<int64_t> memRefShape,
+    Value operand, ArrayRef<int> axes = {}) {
+  // If `axes` is given, only iterate along those axes. By default iterating
+  // along all dimensions. `axes` is a list of non-duplicated ints. Negative
+  // axis is supported.
+  //
+
+  // Rank
+  SmallVector<int, 4> sortedAxes;
+  int rank;
+  if (axes.empty()) {
+    rank =  memRefShape.size();
+    for (int i = 0; i < rank; ++i) {
+      sortedAxes.emplace_back(i);
+    }
+  } else {
+    rank = axes.size();
+    for (int i = 0; i < rank; ++i) {
+      int axis = axes[i] >= 0 ? axes[i] : (rank + axes[i]);
+      sortedAxes.emplace_back(axis);
+    }
+    std::sort(sortedAxes.begin(), sortedAxes.end());
+  }
+
+  auto krnlLoopsOpResult = krnlLoopsOp.getResults();
+  auto krnlOptimizedLoopsOpResult = krnlOptimizedLoopsOp.getResults();
+
+  std::vector<Value> originalLoops;
+  originalLoops.reserve(rank);
+  for (int i : sortedAxes) {
+    originalLoops.push_back(krnlLoopsOpResult[i]);
+  }
+
+  std::vector<Value> optimizedLoops;
+  optimizedLoops.reserve(rank);
+  for (int i : sortedAxes) {
+    optimizedLoops.push_back(krnlOptimizedLoopsOpResult[i]);
+  }
+
+  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+  for (int i : sortedAxes) {
+    if (memRefShape[i] < 0) {
+      pack.pushConstantBound(0);
+      pack.pushOperandBound(
+          rewriter.create<DimOp>(loc, operand, i).getResult());
+    } else {
+      pack.pushConstantBound(0);
+      pack.pushConstantBound(memRefShape[i]);
+    }
+  }
+
+  return pack;
+}
+
+// Insert KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
+// iterating along the given MemRefType's dimensions.
+KrnlIterateOp insertFullKrnlIterateOp(Location loc, PatternRewriter &rewriter,
+                                      ArrayRef<int64_t> memRefShape,
+                                      Value operand, ArrayRef<int> axes = {}) {
+  // If a dimension is unknown, get its value of a corresponding given operand.
+  //
+  // If `axes` is given, only iterate along those axes. By default iterating
+  // along all dimensions. `axes` is a list of non-duplicated ints. Negative
+  // axis is supported.
+  //
+  // There is no optimization in the KrnlOptimizeLoopsOp.
+
+  KrnlIterateOp iterateOp;
+
+  // Number of induction variables
+  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+  // Define loops.
+  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
+  // Define loop optimization.
+  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
+  Block &optimizationBlock = optimizedLoopsOp.region().front();
+
+  KrnlIterateOperandPack pack = createIterateOperandPack(
+      loc, rewriter, loopsOp, optimizedLoopsOp, memRefShape, operand, axes);
+
+  iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+
+  // Insert any optimizations in the KrnlOptimizeLoopsOp body.
+  rewriter.setInsertionPointToEnd(&optimizationBlock);
+  // Return from KrnlOptimizeLoopsOp body.
+  // When no optimizations are present we just return the loops unchaged.
+  rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
+  rewriter.setInsertionPointAfter(iterateOp);
+
+  return iterateOp;
+}
+
 namespace {
 
 template <typename ElementwiseNaryOp>
@@ -695,53 +790,11 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
     auto memRefShape = memRefType.getShape();
     int64_t rank = memRefShape.size();
 
-    // Define loops.
-    auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
-    std::vector<Value> originalLoops;
-    originalLoops.reserve(rank);
-    for (auto result : loopsOp.getResults()) {
-      originalLoops.push_back(result);
-    }
-
-    // Define loop optimization.
-    auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
-    std::vector<Value> optimizedLoops;
-    optimizedLoops.reserve(rank);
-    for (auto result : optimizedLoopsOp.getResults()) {
-      optimizedLoops.push_back(result);
-    }
-    Block &optimizationBlock = optimizedLoopsOp.region().front();
-
-    KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-    // Iterate over the loop nest.
-    // TODO (Tian): move this logic inside KrnlIterateOp. Pass MemRefShape
-    // to KrnlIterateOp instead.
-    for (int i = 0; i < rank; ++i) {
-      if (memRefShape[i] < 0) {
-        pack.pushConstantBound(0);
-        pack.pushOperandBound(
-            rewriter.create<DimOp>(loc, operands[0], i).getResult());
-      } else {
-        pack.pushConstantBound(0);
-        pack.pushConstantBound(memRefShape[i]);
-      }
-    }
-
-    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+    auto iterateOp =
+        insertFullKrnlIterateOp(loc, rewriter, memRefShape, operands[0]);
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
-    // Now perform the insertions into the body of the
-    // just generated instructions:
-
-    // 1. Insert any optimizations in the KrnlOptimizeLoopsOp body.
-    rewriter.setInsertionPointToEnd(&optimizationBlock);
-    // Return from KrnlOptimizeLoopsOp body.
-    // When no optimizations are present we just return the loops
-    // unchaged.
-    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
-    rewriter.setInsertionPoint(optimizedLoopsOp);
-
-    // 2. Insert instructions inside the KernelIterateOp body.
+    // Insert instructions inside the KrnlIterateOp body.
     rewriter.setInsertionPointToStart(&iterationBlock);
 
     // Handle the operation:
@@ -795,59 +848,17 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
 
     // Number of loops
     auto memRefShape = memRefType.getShape();
-    int64_t rank = memRefShape.size();
-
-    // Define loops.
-    auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
-    std::vector<Value> originalLoops;
-    originalLoops.reserve(rank);
-    for (auto result : loopsOp.getResults()) {
-      originalLoops.push_back(result);
-    }
-
-    // Define loop optimization.
-    auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
-    std::vector<Value> optimizedLoops;
-    optimizedLoops.reserve(rank);
-    for (auto result : optimizedLoopsOp.getResults()) {
-      optimizedLoops.push_back(result);
-    }
-    Block &optimizationBlock = optimizedLoopsOp.region().front();
-
-    KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-    // Iterate over the loop nest.
-    // TODO (Tian): move this logic inside KrnlIterateOp. Pass MemRefShape
-    // to KrnlIterateOp instead.
-    for (int i = 0; i < rank; ++i) {
-      if (memRefShape[i] < 0) {
-        pack.pushConstantBound(0);
-        pack.pushOperandBound(
-            rewriter.create<DimOp>(loc, alloc, i).getResult());
-      } else {
-        pack.pushConstantBound(0);
-        pack.pushConstantBound(memRefShape[i]);
-      }
-    }
 
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
     std::map<int, std::map<int, Value>> broadcastedDimInfo =
         getBroadcastedDimInfo(loc, rewriter, memRefType, operands);
 
-    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+    // Create a KrnlIterateOp.
+    auto iterateOp = insertFullKrnlIterateOp(loc, rewriter, memRefShape, alloc);
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
-    // Now perform the insertions into the body of the
-    // just generated instructions:
-
-    // 1. Insert any optimizations in the KrnlOptimizeLoopsOp body.
-    rewriter.setInsertionPointToEnd(&optimizationBlock);
-    // Return from KrnlOptimizeLoopsOp body.
-    // When no optimizations are present we just return the loops unchaged.
-    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
-    rewriter.setInsertionPoint(optimizedLoopsOp);
-
-    // 2. Insert instructions inside the KernelIterateOp body.
+    // Insert instructions inside the KrnlIterateOp body.
     rewriter.setInsertionPointToStart(&iterationBlock);
 
     // Handle the operation:
@@ -921,19 +932,8 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
 
     // Define loops.
     auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
-    std::vector<Value> originalLoops;
-    originalLoops.reserve(rank);
-    for (auto result : loopsOp.getResults()) {
-      originalLoops.push_back(result);
-    }
-
     // Define loop optimization.
     auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
-    std::vector<Value> optimizedLoops;
-    optimizedLoops.reserve(rank);
-    for (auto result : optimizedLoopsOp.getResults()) {
-      optimizedLoops.push_back(result);
-    }
     Block &optimizationBlock = optimizedLoopsOp.region().front();
 
     // Coerce the input into a 2-D tensor. `axis` will be the coercing point.
@@ -942,44 +942,19 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     // Here, we create an outer loop and inner loop for handling the two
     // dimensions. The outer loop is only created once `axis` is not zero.
 
-    // Define an outer loop with respect to axis.
-    std::vector<Value> outerLoops, optimizedOuterLoops;
-    outerLoops.reserve(axis);
-    optimizedOuterLoops.reserve(axis);
-    for (int i = 0; i < axis; ++i) {
-      outerLoops.push_back(originalLoops[i]);
-      optimizedOuterLoops.push_back(optimizedLoops[i]);
+    SmallVector<int, 4> outerAxes, innerAxes;
+    for (int i = 0; i < rank; ++i) {
+      if (i < axis)
+        outerAxes.emplace_back(i);
+      else
+        innerAxes.emplace_back(i);
     }
-    KrnlIterateOperandPack outerPack(rewriter, outerLoops, optimizedOuterLoops);
-    for (int i = 0; i < axis; ++i) {
-      if (memRefShape[i] < 0) {
-        outerPack.pushConstantBound(0);
-        outerPack.pushOperandBound(
-            rewriter.create<DimOp>(loc, operands[0], i).getResult());
-      } else {
-        outerPack.pushConstantBound(0);
-        outerPack.pushConstantBound(memRefShape[i]);
-      }
-    }
-    // Define an inner loop with respect to axis.
-    std::vector<Value> innerLoops, optimizedInnerLoops;
-    innerLoops.reserve(rank - axis);
-    optimizedInnerLoops.reserve(rank - axis);
-    for (int i = axis; i < rank; ++i) {
-      innerLoops.push_back(originalLoops[i]);
-      optimizedInnerLoops.push_back(optimizedLoops[i]);
-    }
-    KrnlIterateOperandPack innerPack(rewriter, innerLoops, optimizedInnerLoops);
-    for (int i = axis; i < rank; ++i) {
-      if (memRefShape[i] < 0) {
-        innerPack.pushConstantBound(0);
-        innerPack.pushOperandBound(
-            rewriter.create<DimOp>(loc, operands[0], i).getResult());
-      } else {
-        innerPack.pushConstantBound(0);
-        innerPack.pushConstantBound(memRefShape[i]);
-      }
-    }
+    KrnlIterateOperandPack outerPack =
+        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                 memRefShape, operands[0], outerAxes);
+    KrnlIterateOperandPack innerPack =
+        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                 memRefShape, operands[0], innerAxes);
 
     KrnlIterateOp outerIterateOp, maxIterateOp, sumIterateOp, softmaxIterateOp;
     SmallVector<Value, 4> outerLoopIVs;
@@ -988,7 +963,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
 
       // No optimization
       rewriter.setInsertionPointToEnd(&optimizationBlock);
-      rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+      rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
       rewriter.setInsertionPoint(optimizedLoopsOp);
 
       // Insert instructions inside the outer loop.
@@ -1021,7 +996,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
 
       // No optimization
       rewriter.setInsertionPointToEnd(&optimizationBlock);
-      rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+      rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
       rewriter.setInsertionPoint(optimizedLoopsOp);
     }
 
@@ -1234,18 +1209,8 @@ struct ONNXGemmOpLowering : public ConversionPattern {
 
     // Define loops.
     auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numLoops);
-    std::vector<Value> originalLoops;
-    originalLoops.reserve(numLoops);
-    for (auto result : loopsOp.getResults()) {
-      originalLoops.push_back(result);
-    }
-
+    // Define loop optimization.
     auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numLoops);
-    std::vector<Value> optimizedLoops;
-    optimizedLoops.reserve(numLoops);
-    for (auto result : optimizedLoopsOp.getResults()) {
-      optimizedLoops.push_back(result);
-    }
     Block &optimizationBlock = optimizedLoopsOp.region().front();
 
     // We have two Krnl loops:
@@ -1253,34 +1218,11 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // - Reduction loop iterates over the reduction dimension.
 
     // Outer loop
-    std::vector<Value> outerLoops, optimizedOuterLoops;
-    outerLoops.reserve(2);
-    optimizedOuterLoops.reserve(2);
-    for (int i = 0; i < 2; ++i) {
-      outerLoops.push_back(originalLoops[i]);
-      optimizedOuterLoops.push_back(optimizedLoops[i]);
-    }
-    KrnlIterateOperandPack outerPack(rewriter, outerLoops,
-                                      optimizedOuterLoops);
-    // Induction variables for the outer loops
-    for (int i = 0; i < 2; ++i) {
-      if (memRefShape[i] < 0) {
-        outerPack.pushConstantBound(0);
-        outerPack.pushOperandBound(
-            rewriter.create<DimOp>(loc, alloc, i).getResult());
-      } else {
-        outerPack.pushConstantBound(0);
-        outerPack.pushConstantBound(memRefShape[i]);
-      }
-    }
+    KrnlIterateOperandPack outerPack = createIterateOperandPack(
+        loc, rewriter, loopsOp, optimizedLoopsOp, memRefShape, alloc, {0, 1});
     // Reduction loop
-    std::vector<Value> reductionLoops, optimizedReductionLoops;
-    reductionLoops.reserve(1);
-    optimizedReductionLoops.reserve(1);
-    reductionLoops.push_back(originalLoops[2]);
-    optimizedReductionLoops.push_back(optimizedLoops[2]);
-    KrnlIterateOperandPack reductionPack(rewriter, reductionLoops,
-                                         optimizedReductionLoops);
+    KrnlIterateOperandPack reductionPack(rewriter, {loopsOp.getResults()[2]},
+                                         {optimizedLoopsOp.getResults()[2]});
     // Induction variable for the reduction dimension
     // Try to find and use a static value from A or B first.
     // If it failed then use a dynamic value.
@@ -1321,7 +1263,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
 
     // No optimization
     rewriter.setInsertionPointToEnd(&optimizationBlock);
-    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+    rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
     rewriter.setInsertionPoint(optimizedLoopsOp);
 
     // Insert instructions inside the outer loop.
