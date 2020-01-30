@@ -787,12 +787,9 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
                                     {operands[0]});
 
-    // Number of loops
-    auto memRefShape = memRefType.getShape();
-    int64_t rank = memRefShape.size();
-
-    KrnlIterateOp iterateOp =
-        std::get<2>(insertKrnlOps(loc, rewriter, memRefShape, operands[0]));
+    // Create a KrnlIterateOp.
+    KrnlIterateOp iterateOp = std::get<2>(
+        insertKrnlOps(loc, rewriter, memRefType.getShape(), operands[0]));
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Insert instructions inside the KrnlIterateOp body.
@@ -847,9 +844,6 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
                                     operands);
 
-    // Number of loops
-    auto memRefShape = memRefType.getShape();
-
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
     std::map<int, std::map<int, Value>> broadcastedDimInfo =
@@ -857,7 +851,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
 
     // Create a KrnlIterateOp.
     KrnlIterateOp iterateOp =
-        std::get<2>(insertKrnlOps(loc, rewriter, memRefShape, alloc));
+        std::get<2>(insertKrnlOps(loc, rewriter, memRefType.getShape(), alloc));
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Insert instructions inside the KrnlIterateOp body.
