@@ -231,17 +231,37 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
 KrnlIterateOperandPack createIterateOperandPack(
     Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
     KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
-    Value operand, ArrayRef<int> axes = {}) {
-  // If `axes` is given, only iterate along those axes of the loopsOp's result.
-  // By default, iterating along all axes. `axes` is a list of non-duplicated
-  // ints. Negative axis is supported.
+    Value operand, ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
+  // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
+  // supported.
+  //
+  // If `loopsAxes` is given, only iterate along those axes of the loopsOp's
+  // result. By default, iterating along all axes.
+  //
+  // If `axes` is given, only iterate along those axes of `memRefShape` and
+  // `operand`. By default, iterating along all axes.
   //
 
   auto loopsOpResult = loopsOp.getResults();
   auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
 
   // Number of induction variables.
-  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+  int numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
+
+  // Create a sorted vector of loops axes.
+  SmallVector<int, 4> sortedLoopsAxes;
+  if (loopsAxes.empty()) {
+    for (int i = 0; i < numIVs; ++i) {
+      sortedLoopsAxes.emplace_back(i);
+    }
+  } else {
+    for (int i = 0; i < numIVs; ++i) {
+      int axis = (loopsAxes[i] >= 0) ? loopsAxes[i]
+                                     : (loopsOpResult.size() + loopsAxes[i]);
+      sortedLoopsAxes.emplace_back(axis);
+    }
+    std::sort(sortedLoopsAxes.begin(), sortedLoopsAxes.end());
+  }
 
   // Create a sorted vector of axes.
   SmallVector<int, 4> sortedAxes;
@@ -256,12 +276,13 @@ KrnlIterateOperandPack createIterateOperandPack(
     }
     std::sort(sortedAxes.begin(), sortedAxes.end());
   }
+  assert((sortedAxes.size() == sortedLoopsAxes.size()) && "Invalid Arguments");
 
   // Create vectors of induction variables.
   std::vector<Value> originalLoops, optimizedLoops;
   originalLoops.reserve(numIVs);
   optimizedLoops.reserve(numIVs);
-  for (int i = 0; i < sortedAxes.size(); ++i) {
+  for (int i : sortedLoopsAxes) {
     originalLoops.push_back(loopsOpResult[i]);
     optimizedLoops.push_back(optimizedLoopsOpResult[i]);
   }
@@ -304,10 +325,14 @@ insertKrnlOps(Location loc, PatternRewriter &rewriter,
   auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
   // Create a KrnlIterateOp
   KrnlIterateOp iterateOp;
-  if (includeIterateOp)
+  if (includeIterateOp) {
+    SmallVector<int, 4> loopsAxes;
+    for (int i = 0; i < axes.size(); ++i)
+      loopsAxes.emplace_back(i);
     iterateOp = rewriter.create<KrnlIterateOp>(
         loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                      memRefShape, operand, axes));
+                                      memRefShape, operand, loopsAxes, axes));
+  }
 
   // No optimization
   rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
@@ -1382,7 +1407,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
           outerAxes.emplace_back(i);
         auto outerPack =
             createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                     memRefShape, alloc, outerAxes);
+                                     memRefShape, alloc, outerAxes, outerAxes);
         auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
 
         // Insert instructions into the outer KrnlIterateOp.
@@ -1397,7 +1422,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       // Create a KrnlIterateOp for matrix multiplication.
       auto matmulPack =
           createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                   memRefShape, alloc, {-1, -2});
+                                   memRefShape, alloc, {-1, -2}, {-1, -2});
       auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, matmulPack);
 
       // Insert instructions into the matmul KrnlIterateOp.
@@ -1430,8 +1455,8 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
 
       //  Iterate along the reduction dimension.
       //  Use a value from A.
-      auto reduceIterateOp =
-          std::get<2>(insertKrnlOps(loc, rewriter, AShape, A, {-1}));
+      auto reduceIterateOp = std::get<2>(
+          insertKrnlOps(loc, rewriter, AShape, A, {-1}));
 
       // Insert instructions into the reduction KrnlIterateOp.
       Block &reduceIterationBlock = reduceIterateOp.bodyRegion().front();
