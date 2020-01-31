@@ -181,7 +181,7 @@ getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
         auto dim = rewriter.create<DimOp>(loc, operands[i], j).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
         auto isBroadcasted =
-          rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
+            rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
         broadcastedDims.insert(std::make_pair(j, isBroadcasted));
       }
     }
@@ -228,13 +228,13 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
 }
 
 // Create an iterate operand pack for KrnlIterateOp
-KrnlIterateOperandPack createIterateOperandPack(Location loc,
-    PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
+KrnlIterateOperandPack createIterateOperandPack(
+    Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
     KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
     Value operand, ArrayRef<int> axes = {}) {
-  // If `axes` is given, only iterate along those axes. By default, iterating
-  // along all axes. `axes` is a list of non-duplicated ints. Negative
-  // axis is supported.
+  // If `axes` is given, only iterate along those axes of the loopsOp's result.
+  // By default, iterating along all axes. `axes` is a list of non-duplicated
+  // ints. Negative axis is supported.
   //
 
   auto loopsOpResult = loopsOp.getResults();
@@ -242,7 +242,6 @@ KrnlIterateOperandPack createIterateOperandPack(Location loc,
 
   // Number of induction variables.
   int numIVs = axes.empty() ? memRefShape.size() : axes.size();
-  assert((numIVs <= loopsOpResult.size()) && "Invalid axes");
 
   // Create a sorted vector of axes.
   SmallVector<int, 4> sortedAxes;
@@ -252,8 +251,7 @@ KrnlIterateOperandPack createIterateOperandPack(Location loc,
     }
   } else {
     for (int i = 0; i < numIVs; ++i) {
-      int axis = axes[i] >= 0 ? axes[i] : (numIVs + axes[i]);
-      assert((axis < loopsOpResult.size()) && "Invalid axis");
+      int axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
       sortedAxes.emplace_back(axis);
     }
     std::sort(sortedAxes.begin(), sortedAxes.end());
@@ -263,7 +261,7 @@ KrnlIterateOperandPack createIterateOperandPack(Location loc,
   std::vector<Value> originalLoops, optimizedLoops;
   originalLoops.reserve(numIVs);
   optimizedLoops.reserve(numIVs);
-  for (int i : sortedAxes) {
+  for (int i = 0; i < sortedAxes.size(); ++i) {
     originalLoops.push_back(loopsOpResult[i]);
     optimizedLoops.push_back(optimizedLoopsOpResult[i]);
   }
@@ -284,17 +282,16 @@ KrnlIterateOperandPack createIterateOperandPack(Location loc,
   return pack;
 }
 
-// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
-// iterating along the given MemRefType's dimensions.
+// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp.
 std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
 insertKrnlOps(Location loc, PatternRewriter &rewriter,
               ArrayRef<int64_t> memRefShape, Value operand,
               ArrayRef<int> axes = {}, bool includeIterateOp = true) {
   // If a dimension is unknown, get its value of a corresponding given operand.
   //
-  // If `axes` is given, only iterate along those axes. By default, iterating
-  // along all axes. `axes` is a list of non-duplicated ints. Negative
-  // axis is supported.
+  // If `axes` is given, only iterate along those axes of the memRefShape. By
+  // default, iterating along all axes. `axes` is a list of non-duplicated ints.
+  // Negative axis is supported.
   //
   // There is no optimization in the KrnlOptimizeLoopsOp.
 
@@ -522,9 +519,11 @@ Value mapToLowerScalarOp<ONNXHardSigmoidOp>(
   //                                  Constant 1)
   auto loc = op->getLoc();
   Value operand = operands[0];
-  auto alphaAttribute = FloatAttr::get(rewriter.getF32Type(),
+  auto alphaAttribute = FloatAttr::get(
+      rewriter.getF32Type(),
       llvm::dyn_cast<ONNXHardSigmoidOp>(op).alpha().convertToFloat());
-  auto betaAttribute = FloatAttr::get(rewriter.getF32Type(),
+  auto betaAttribute = FloatAttr::get(
+      rewriter.getF32Type(),
       llvm::dyn_cast<ONNXHardSigmoidOp>(op).beta().convertToFloat());
   auto elementType = result_types[0];
 
@@ -559,8 +558,9 @@ Value mapToLowerScalarOp<ONNXEluOp>(Operation *op, ArrayRef<Type> result_types,
   Value operand = operands[0];
   auto elementType = result_types[0];
 
-  auto alphaAttribute = FloatAttr::get(rewriter.getF32Type(),
-      llvm::dyn_cast<ONNXEluOp>(op).alpha().convertToFloat());
+  auto alphaAttribute =
+      FloatAttr::get(rewriter.getF32Type(),
+                     llvm::dyn_cast<ONNXEluOp>(op).alpha().convertToFloat());
   auto zero = rewriter.create<ConstantOp>(loc, FloatAttr::get(elementType, 0));
   auto one = rewriter.create<ConstantOp>(loc, FloatAttr::get(elementType, 1));
   auto alpha = rewriter.create<ConstantOp>(loc, alphaAttribute);
@@ -613,7 +613,8 @@ Value mapToLowerScalarOp<ONNXLeakyReluOp>(Operation *op,
   Value operand = operands[0];
   auto elementType = result_types[0];
 
-  auto alphaAttribute = FloatAttr::get(rewriter.getF32Type(),
+  auto alphaAttribute = FloatAttr::get(
+      rewriter.getF32Type(),
       llvm::dyn_cast<ONNXLeakyReluOp>(op).alpha().convertToFloat());
   auto zero = rewriter.create<ConstantOp>(loc, FloatAttr::get(elementType, 0));
   auto alpha = rewriter.create<ConstantOp>(loc, alphaAttribute);
@@ -639,10 +640,12 @@ Value mapToLowerScalarOp<ONNXSeluOp>(Operation *op, ArrayRef<Type> result_types,
   //                                         alpha)))
   auto loc = op->getLoc();
   Value operand = operands[0];
-  auto alphaAttribute = FloatAttr::get(rewriter.getF32Type(),
-      llvm::dyn_cast<ONNXSeluOp>(op).alpha().convertToFloat());
-  auto gammaAttribute = FloatAttr::get(rewriter.getF32Type(),
-      llvm::dyn_cast<ONNXSeluOp>(op).gamma().convertToFloat());
+  auto alphaAttribute =
+      FloatAttr::get(rewriter.getF32Type(),
+                     llvm::dyn_cast<ONNXSeluOp>(op).alpha().convertToFloat());
+  auto gammaAttribute =
+      FloatAttr::get(rewriter.getF32Type(),
+                     llvm::dyn_cast<ONNXSeluOp>(op).gamma().convertToFloat());
   auto elementType = result_types[0];
 
   auto zero = rewriter.create<ConstantOp>(loc, FloatAttr::get(elementType, 0));
@@ -682,9 +685,10 @@ Value mapToLowerScalarOp<ONNXReciprocalOp>(
 // Scalar unary ops for lowering ONNXSoftplusOp
 //===----------------------------------------------------------------------===//
 template <>
-Value mapToLowerScalarOp<ONNXSoftplusOp>(
-    Operation *op, ArrayRef<Type> result_types, ArrayRef<Value> operands,
-    ConversionPatternRewriter &rewriter) {
+Value mapToLowerScalarOp<ONNXSoftplusOp>(Operation *op,
+                                         ArrayRef<Type> result_types,
+                                         ArrayRef<Value> operands,
+                                         ConversionPatternRewriter &rewriter) {
   // ONNXSoftplusOp(%X) = LogOp(AddFOp(ExpOp(%X), ConstantOp 1))
   auto loc = op->getLoc();
   Value operand = operands[0];
@@ -702,9 +706,10 @@ Value mapToLowerScalarOp<ONNXSoftplusOp>(
 // Scalar unary ops for lowering ONNXSoftsignOp
 //===----------------------------------------------------------------------===//
 template <>
-Value mapToLowerScalarOp<ONNXSoftsignOp>(
-    Operation *op, ArrayRef<Type> result_types, ArrayRef<Value> operands,
-    ConversionPatternRewriter &rewriter) {
+Value mapToLowerScalarOp<ONNXSoftsignOp>(Operation *op,
+                                         ArrayRef<Type> result_types,
+                                         ArrayRef<Value> operands,
+                                         ConversionPatternRewriter &rewriter) {
   // ONNXSoftsignOp(%X) = DivFOp(ConstantOp 1, %X)
   auto loc = op->getLoc();
   Value operand = operands[0];
@@ -1249,7 +1254,7 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
               loc, loadedVal, rewriter.getIntegerType(64));
         tensorSize = rewriter.create<MulIOp>(loc, tensorSize, int64LoadedVal);
         allocOperands.push_back(rewriter.create<IndexCastOp>(
-              loc, loadedVal, rewriter.getIndexType()));
+            loc, loadedVal, rewriter.getIndexType()));
       }
       AllocOp allocateMemref =
           rewriter.create<AllocOp>(loc, memRefType, allocOperands);
@@ -1294,6 +1299,8 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
 
     // Result type
     auto memRefType = convertTensorToMemRef(tensorType);
+    auto elementType = memRefType.getElementType();
+    auto memRefShape = memRefType.getShape();
 
     // Insert an allocation and deallocation for the result of this operation.
     Value alloc;
@@ -1301,7 +1308,6 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
     if (hasAllConstantDimensions(memRefType))
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
     else {
-      auto memRefShape = memRefType.getShape();
       SmallVector<Value, 4> allocOperands;
       if (AShape.size() >= 2 && BShape.size() >= 2) {
         // Both arguments are N-D, N >= 2
@@ -1358,7 +1364,103 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
     }
 
+    // Define loops.
+    KrnlDefineLoopsOp loopsOp;
+    KrnlOptimizeLoopsOp optimizedLoopsOp;
+    auto krnlOps = insertKrnlOps(loc, rewriter, memRefShape, alloc, {},
+                                 /*includeIterateOp*/ false);
+    loopsOp = std::get<0>(krnlOps);
+    optimizedLoopsOp = std::get<1>(krnlOps);
+
+    // Insert instructions.
     if ((AShape.size() >= 2) && (BShape.size() >= 2)) {
+      SmallVector<Value, 4> loopOuterIVs;
+      if ((AShape.size() > 2) || (BShape.size() > 2)) {
+        // Outer KrnlIterateOp
+        SmallVector<int, 4> outerAxes;
+        for (int i = 0; i < memRefShape.size() - 2; ++i)
+          outerAxes.emplace_back(i);
+        auto outerPack =
+            createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                     memRefShape, alloc, outerAxes);
+        auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
+
+        // Insert instructions into the outer KrnlIterateOp.
+        Block &outerIterationBlock = outerIterateOp.bodyRegion().front();
+        rewriter.setInsertionPointToStart(&outerIterationBlock);
+
+        // Induction variables: non-matrix-multiplication variables.
+        for (auto arg : outerIterationBlock.getArguments()) {
+          loopOuterIVs.emplace_back(arg);
+        }
+      }
+      // Create a KrnlIterateOp for matrix multiplication.
+      auto matmulPack =
+          createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                   memRefShape, alloc, {-1, -2});
+      auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, matmulPack);
+
+      // Insert instructions into the matmul KrnlIterateOp.
+      Block &matmulIterationBlock = matmulIterateOp.bodyRegion().front();
+      rewriter.setInsertionPointToStart(&matmulIterationBlock);
+
+      // Induction variables: M, N
+      SmallVector<Value, 4> loopMNIVs;
+      for (auto arg : matmulIterationBlock.getArguments()) {
+        loopMNIVs.emplace_back(arg);
+      }
+      // Induction variables for the final result.
+      SmallVector<Value, 4> loopOuterMNIVs;
+      for (auto arg : loopOuterIVs) {
+        loopOuterMNIVs.emplace_back(arg);
+      }
+      for (auto arg : loopMNIVs) {
+        loopOuterMNIVs.emplace_back(arg);
+      }
+
+      // Fill the output with value 0.
+      Value zero;
+      if (elementType.isa<IntegerType>())
+        zero = rewriter.create<ConstantOp>(
+            loc, IntegerAttr::get(memRefType.getElementType(), 0));
+      else if (elementType.isa<FloatType>())
+        zero = rewriter.create<ConstantOp>(
+            loc, FloatAttr::get(memRefType.getElementType(), 0));
+      rewriter.create<StoreOp>(loc, zero, alloc, loopOuterMNIVs);
+
+      //  Iterate along the reduction dimension.
+      //  Use a value from A.
+      auto reduceIterateOp =
+          std::get<2>(insertKrnlOps(loc, rewriter, AShape, A, {-1}));
+
+      // Insert instructions into the reduction KrnlIterateOp.
+      Block &reduceIterationBlock = reduceIterateOp.bodyRegion().front();
+      rewriter.setInsertionPointToStart(&reduceIterationBlock);
+
+      // Induction variables
+      SmallVector<Value, 4> loopKIVs, loopOuterMKIVs, loopOuterKNIVs;
+      // K
+      loopKIVs.emplace_back(reduceIterationBlock.getArguments()[0]);
+      // MK
+      if (AShape.size() > 2)
+        for (auto arg : loopOuterIVs)
+          loopOuterMKIVs.emplace_back(arg);
+      loopOuterMKIVs.emplace_back(loopMNIVs[0]);
+      loopOuterMKIVs.emplace_back(loopKIVs[0]);
+      // KN
+      if (BShape.size() > 2)
+        for (auto arg : loopOuterIVs)
+          loopOuterKNIVs.emplace_back(arg);
+      loopOuterKNIVs.emplace_back(loopKIVs[0]);
+      loopOuterKNIVs.emplace_back(loopMNIVs[1]);
+
+      // Matmul computation
+      auto loadedA = rewriter.create<LoadOp>(loc, A, loopOuterMKIVs);
+      auto loadedB = rewriter.create<LoadOp>(loc, B, loopOuterKNIVs);
+      auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopOuterMNIVs);
+      auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
+      auto accumulated = rewriter.create<AddFOp>(loc, loadedY, AB);
+      rewriter.create<StoreOp>(loc, accumulated, alloc, loopOuterMNIVs);
     } else if ((AShape.size() == 1) && (BShape.size() == 1)) {
     } else {
     }
@@ -1384,10 +1486,12 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     B = operands[1];
     C = operands[2];
 
-    auto alphaAttr = FloatAttr::get(tensorType.getElementType(),
-        llvm::dyn_cast<ONNXGemmOp>(op).alpha().convertToFloat());
-    auto betaAttr = FloatAttr::get(tensorType.getElementType(),
-        llvm::dyn_cast<ONNXGemmOp>(op).beta().convertToFloat());
+    auto alphaAttr =
+        FloatAttr::get(tensorType.getElementType(),
+                       llvm::dyn_cast<ONNXGemmOp>(op).alpha().convertToFloat());
+    auto betaAttr =
+        FloatAttr::get(tensorType.getElementType(),
+                       llvm::dyn_cast<ONNXGemmOp>(op).beta().convertToFloat());
     auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
     auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
 
@@ -1453,8 +1557,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
       outerLoops.push_back(originalLoops[i]);
       optimizedOuterLoops.push_back(optimizedLoops[i]);
     }
-    KrnlIterateOperandPack outerPack(rewriter, outerLoops,
-                                      optimizedOuterLoops);
+    KrnlIterateOperandPack outerPack(rewriter, outerLoops, optimizedOuterLoops);
     // Induction variables for the outer loops
     for (int i = 0; i < 2; ++i) {
       if (memRefShape[i] < 0) {
@@ -1483,13 +1586,12 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     int64_t K_B_Idx = (isTransB) ? 1 : 0;
     reductionPack.pushConstantBound(0);
     if (ATy.getShape()[K_A_Idx] != -1)
-        reductionPack.pushConstantBound(ATy.getShape()[K_A_Idx]);
+      reductionPack.pushConstantBound(ATy.getShape()[K_A_Idx]);
+    else if (BTy.getShape()[K_B_Idx] != -1)
+      reductionPack.pushConstantBound(BTy.getShape()[K_B_Idx]);
     else
-      if (BTy.getShape()[K_B_Idx] != -1)
-        reductionPack.pushConstantBound(BTy.getShape()[K_B_Idx]);
-      else
-        reductionPack.pushOperandBound(
-            rewriter.create<DimOp>(loc, B, K_B_Idx).getResult());
+      reductionPack.pushOperandBound(
+          rewriter.create<DimOp>(loc, B, K_B_Idx).getResult());
 
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
@@ -1502,7 +1604,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
         auto dim = rewriter.create<DimOp>(loc, C, i).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
         auto isBroadcasted =
-          rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
+            rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
         broadcastedDimInfo.insert(std::make_pair(i, isBroadcasted));
       }
     }
@@ -1536,8 +1638,8 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, reductionPack);
 
     // Compute beta*C, and add up to alpha*A*B (unidirectional broadcasting)
-    auto loopCIVs = getLoopIVsForBroadcasting(
-        loc, rewriter, loopMNIVs, C, broadcastedDimInfo);
+    auto loopCIVs = getLoopIVsForBroadcasting(loc, rewriter, loopMNIVs, C,
+                                              broadcastedDimInfo);
     auto loadedC = rewriter.create<LoadOp>(loc, C, loopCIVs);
     auto loadedAB = rewriter.create<LoadOp>(loc, alloc, loopMNIVs);
     auto alphaAB = rewriter.create<MulFOp>(loc, alpha, loadedAB);
@@ -1629,8 +1731,8 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
         Value dimVal = nullptr;
         if (memRefShape[outIdx] < 0) {
           Value index = rewriter.create<DimOp>(loc, operands[0], inIdx);
-          dimVal = rewriter.create<IndexCastOp>(
-              loc, index, rewriter.getIntegerType(64));
+          dimVal = rewriter.create<IndexCastOp>(loc, index,
+                                                rewriter.getIntegerType(64));
           allocOperands.emplace_back(index);
         } else {
           dimVal = rewriter.create<ConstantOp>(
@@ -1739,8 +1841,8 @@ struct ONNXTransposeOpLowering : public ConversionPattern {
       // TODO: Remove when perm is guaranteed to be present (even for
       // the default case). This means that perm was added by shape
       // inference or another pass to contain the values corresponding
-      // to the default behavior of Transpose. 
-      for (int i = iterationBlock.getArguments().size()-1; i >= 0; i--)
+      // to the default behavior of Transpose.
+      for (int i = iterationBlock.getArguments().size() - 1; i >= 0; i--)
         perm.emplace_back(i);
     }
 
@@ -1749,7 +1851,7 @@ struct ONNXTransposeOpLowering : public ConversionPattern {
       inLoopIVs.emplace_back(arg);
 
     SmallVector<Value, 4> outLoopIVs;
-    for (int i=0; i<iterationBlock.getArguments().size(); ++i)
+    for (int i = 0; i < iterationBlock.getArguments().size(); ++i)
       outLoopIVs.emplace_back(iterationBlock.getArguments()[perm[i]]);
 
     auto inVal = rewriter.create<LoadOp>(loc, operands[0], inLoopIVs);
