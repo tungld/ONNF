@@ -18,15 +18,31 @@ using namespace mlir;
 
 namespace {
 
-// Due to a limitation of ODS that "all ODS-generated `build()` methods require
-// specifying the result type(s), unless the op has known traits like
-// `SameOperandsAndResultType` that we can use to auto-generate a `build()`
-// method with result type deduction", we will to rewrite some patterns manually
-// until we find a better way.
+// There are two ways to write rewrite rules:
+// - Declarative manner: specify rewrite rules in a TableGen record, and
+// - Manual Manner: subclass the mlir::RewritePattern.
+//
+// We prefer to use the former way as much as possible. However, there is a
+// limitation about operation definition specification (ODS) in TableGen that
+// requires us to write custom builders, that is
+// "all ODS-generated `build()` methods require specifying the result type(s),
+// unless the op has known traits like `SameOperandsAndResultType` that we can
+// use to auto-generate a `build()` method with result type deduction".
 //
 // More information about the limitation can be found here:
 // https://github.com/llvm/llvm-project/blob/master/mlir/docs/DeclarativeRewrites.md#building-operations
 //
+// Currently, we use the latter way of writing rewrite rules. There are two
+// reasons for this decision:
+// - To insert custom builders for operations, it is better to change the script
+// gen_doc.py to generate all possibles custom builders for a large class of
+// operations. At the time of this patch created, the gen_doc.py was changing,
+// so we decided to write manually to reduce conflicts.
+// - In declarative rewriting, we should deal with optional attributes. E.g. for
+// to handle optional attributes, but I haven't tried it yet.
+//
+// Once we have done the above issues, we will switch to use the declarative
+// manner.
 
 //===----------------------------------------------------------------------===//
 // ONNXReduceL1Op %X = ONNXReduceSumOp (ONNXAbsOp %X)
