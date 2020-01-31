@@ -227,6 +227,102 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
+// Create an iterate operand pack for KrnlIterateOp
+KrnlIterateOperandPack createIterateOperandPack(Location loc,
+    PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
+    KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
+    Value operand, ArrayRef<int> axes = {}) {
+  // If `axes` is given, only iterate along those axes. By default, iterating
+  // along all axes. `axes` is a list of non-duplicated ints. Negative
+  // axis is supported.
+  //
+
+  auto loopsOpResult = loopsOp.getResults();
+  auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
+
+  // Number of induction variables.
+  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+  assert((numIVs <= loopsOpResult.size()) && "Invalid axes");
+
+  // Create a sorted vector of axes.
+  SmallVector<int, 4> sortedAxes;
+  if (axes.empty()) {
+    for (int i = 0; i < numIVs; ++i) {
+      sortedAxes.emplace_back(i);
+    }
+  } else {
+    for (int i = 0; i < numIVs; ++i) {
+      int axis = axes[i] >= 0 ? axes[i] : (numIVs + axes[i]);
+      assert((axis < loopsOpResult.size()) && "Invalid axis");
+      sortedAxes.emplace_back(axis);
+    }
+    std::sort(sortedAxes.begin(), sortedAxes.end());
+  }
+
+  // Create vectors of induction variables.
+  std::vector<Value> originalLoops, optimizedLoops;
+  originalLoops.reserve(numIVs);
+  optimizedLoops.reserve(numIVs);
+  for (int i : sortedAxes) {
+    originalLoops.push_back(loopsOpResult[i]);
+    optimizedLoops.push_back(optimizedLoopsOpResult[i]);
+  }
+
+  // Create an operand pack.
+  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+  for (int i : sortedAxes) {
+    if (memRefShape[i] < 0) {
+      pack.pushConstantBound(0);
+      pack.pushOperandBound(
+          rewriter.create<DimOp>(loc, operand, i).getResult());
+    } else {
+      pack.pushConstantBound(0);
+      pack.pushConstantBound(memRefShape[i]);
+    }
+  }
+
+  return pack;
+}
+
+// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
+// iterating along the given MemRefType's dimensions.
+std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
+insertKrnlOps(Location loc, PatternRewriter &rewriter,
+              ArrayRef<int64_t> memRefShape, Value operand,
+              ArrayRef<int> axes = {}, bool includeIterateOp = true) {
+  // If a dimension is unknown, get its value of a corresponding given operand.
+  //
+  // If `axes` is given, only iterate along those axes. By default, iterating
+  // along all axes. `axes` is a list of non-duplicated ints. Negative
+  // axis is supported.
+  //
+  // There is no optimization in the KrnlOptimizeLoopsOp.
+
+  // Number of induction variables.
+  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+
+  // Define loops.
+  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
+  // Define loop optimization.
+  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
+  // Create a KrnlIterateOp
+  KrnlIterateOp iterateOp;
+  if (includeIterateOp)
+    iterateOp = rewriter.create<KrnlIterateOp>(
+        loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                      memRefShape, operand, axes));
+
+  // No optimization
+  rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
+  rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
+  if (includeIterateOp)
+    rewriter.setInsertionPointAfter(iterateOp);
+  else
+    rewriter.setInsertionPointAfter(optimizedLoopsOp);
+
+  return std::make_tuple(loopsOp, optimizedLoopsOp, iterateOp);
+}
+
 namespace {
 
 template <typename ElementwiseNaryOp>
@@ -1191,6 +1287,11 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
     auto AShape = A.getType().cast<MemRefType>().getShape();
     auto BShape = B.getType().cast<MemRefType>().getShape();
 
+    // There are three cases related to the shapes of the two arguments:
+    // - Both arguments are N-D, N >= 2
+    // - Either argument is 1-D, the other is N-D, N >= 2
+    // - Both arguments are 1-D
+
     // Result type
     auto memRefType = convertTensorToMemRef(tensorType);
 
@@ -1202,50 +1303,14 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
     else {
       auto memRefShape = memRefType.getShape();
       SmallVector<Value, 4> allocOperands;
-      if (AShape.size() == 1 && BShape.size() == 1) {
-        // Both arguments are 1-D
-        if (memRefShape[0] < 0) {
-          auto dim = rewriter.create<DimOp>(loc, A, 0);
-          allocOperands.emplace_back(dim);
-        }
-      } else if (AShape.size() > 2 && BShape.size() > 2) {
-        // Both arguments are N-D, N > 2
+      if (AShape.size() >= 2 && BShape.size() >= 2) {
+        // Both arguments are N-D, N >= 2
         for (int i = 0; i < memRefShape.size() - 2; ++i) {
           if (memRefShape[i] < 0) {
-            auto dim = rewriter.create<DimOp>(loc, A, i);
-            allocOperands.emplace_back(dim);
-          }
-        }
-        if (memRefShape[memRefShape.size() - 2] < 0) {
-          auto dim = rewriter.create<DimOp>(loc, A, memRefShape.size() - 2);
-          allocOperands.emplace_back(dim);
-        }
-        if (memRefShape[memRefShape.size() - 1] < 0) {
-          auto dim = rewriter.create<DimOp>(loc, B, memRefShape.size() - 1);
-          allocOperands.emplace_back(dim);
-        }
-      } else if (AShape.size() == 2 && BShape.size() > 2) {
-        //  Either argument is N-D, N > 2
-        for (int i = 0; i < memRefShape.size() - 2; ++i) {
-          if (memRefShape[i] < 0) {
-            auto dim = rewriter.create<DimOp>(loc, B, i);
-            allocOperands.emplace_back(dim);
-          }
-        }
-        if (memRefShape[memRefShape.size() - 2] < 0) {
-          auto dim = rewriter.create<DimOp>(loc, A, memRefShape.size() - 2);
-          allocOperands.emplace_back(dim);
-        }
-        if (memRefShape[memRefShape.size() - 1] < 0) {
-          auto dim = rewriter.create<DimOp>(loc, B, memRefShape.size() - 1);
-          allocOperands.emplace_back(dim);
-        }
-      } else if (AShape.size() > 2 && BShape.size() == 2) {
-        //  Either argument is N-D, N > 2
-        for (int i = 0; i < memRefShape.size() - 2; ++i) {
-          if (memRefShape[i] < 0) {
-            auto dim = rewriter.create<DimOp>(loc, A, i);
-            allocOperands.emplace_back(dim);
+            if ((AShape.size() == 2) && (BShape.size() > 2))
+              allocOperands.emplace_back(rewriter.create<DimOp>(loc, B, i));
+            else if ((AShape.size() > 2) && (BShape.size() == 2))
+              allocOperands.emplace_back(rewriter.create<DimOp>(loc, A, i));
           }
         }
         if (memRefShape[memRefShape.size() - 2] < 0) {
@@ -1280,11 +1345,22 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
           auto dim = rewriter.create<DimOp>(loc, A, AShape.size() - 2);
           allocOperands.emplace_back(dim);
         }
+      } else if (AShape.size() == 1 && BShape.size() == 1) {
+        // Both arguments are 1-D
+        if (memRefShape[0] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, A, 0);
+          allocOperands.emplace_back(dim);
+        }
       } else {
         emitError(loc, "Invalid shapes");
       }
 
       alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
+    }
+
+    if ((AShape.size() >= 2) && (BShape.size() >= 2)) {
+    } else if ((AShape.size() == 1) && (BShape.size() == 1)) {
+    } else {
     }
 
     rewriter.replaceOp(op, alloc);
