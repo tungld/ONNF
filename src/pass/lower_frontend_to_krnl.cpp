@@ -1327,6 +1327,18 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
     auto elementType = memRefType.getElementType();
     auto memRefShape = memRefType.getShape();
 
+    // A value zero
+    Value zero;
+    if (elementType.isa<IntegerType>()) {
+      zero = rewriter.create<ConstantOp>(
+          loc, IntegerAttr::get(memRefType.getElementType(), 0));
+    } else if (elementType.isa<FloatType>()) {
+      zero = rewriter.create<ConstantOp>(
+          loc, FloatAttr::get(memRefType.getElementType(), 0));
+    } else {
+      emitError(loc, "unsupported element type");
+    }
+
     // Insert an allocation and deallocation for the result of this operation.
     Value alloc;
     bool insertDealloc = checkInsertDealloc(op);
@@ -1389,16 +1401,16 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
     }
 
-    // Define loops.
-    KrnlDefineLoopsOp loopsOp;
-    KrnlOptimizeLoopsOp optimizedLoopsOp;
-    auto krnlOps = insertKrnlOps(loc, rewriter, memRefShape, alloc, {},
-                                 /*includeIterateOp*/ false);
-    loopsOp = std::get<0>(krnlOps);
-    optimizedLoopsOp = std::get<1>(krnlOps);
-
     // Insert instructions.
     if ((AShape.size() >= 2) && (BShape.size() >= 2)) {
+      // Define loops.
+      KrnlDefineLoopsOp loopsOp;
+      KrnlOptimizeLoopsOp optimizedLoopsOp;
+      auto krnlOps = insertKrnlOps(loc, rewriter, memRefShape, alloc, {},
+                                   /*includeIterateOp*/ false);
+      loopsOp = std::get<0>(krnlOps);
+      optimizedLoopsOp = std::get<1>(krnlOps);
+
       SmallVector<Value, 4> loopOuterIVs;
       if ((AShape.size() > 2) || (BShape.size() > 2)) {
         // Outer KrnlIterateOp
@@ -1444,13 +1456,6 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       }
 
       // Fill the output with value 0.
-      Value zero;
-      if (elementType.isa<IntegerType>())
-        zero = rewriter.create<ConstantOp>(
-            loc, IntegerAttr::get(memRefType.getElementType(), 0));
-      else if (elementType.isa<FloatType>())
-        zero = rewriter.create<ConstantOp>(
-            loc, FloatAttr::get(memRefType.getElementType(), 0));
       rewriter.create<StoreOp>(loc, zero, alloc, loopOuterMNIVs);
 
       //  Iterate along the reduction dimension.
@@ -1483,10 +1488,48 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       auto loadedA = rewriter.create<LoadOp>(loc, A, loopOuterMKIVs);
       auto loadedB = rewriter.create<LoadOp>(loc, B, loopOuterKNIVs);
       auto loadedY = rewriter.create<LoadOp>(loc, alloc, loopOuterMNIVs);
-      auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
-      auto accumulated = rewriter.create<AddFOp>(loc, loadedY, AB);
-      rewriter.create<StoreOp>(loc, accumulated, alloc, loopOuterMNIVs);
+      if (elementType.isa<IntegerType>()) {
+        auto AB = rewriter.create<MulIOp>(loc, loadedA, loadedB);
+        auto accumulated = rewriter.create<AddIOp>(loc, loadedY, AB);
+        rewriter.create<StoreOp>(loc, accumulated, alloc, loopOuterMNIVs);
+      } else if (elementType.isa<FloatType>()) {
+        auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
+        auto accumulated = rewriter.create<AddFOp>(loc, loadedY, AB);
+        rewriter.create<StoreOp>(loc, accumulated, alloc, loopOuterMNIVs);
+      }
     } else if ((AShape.size() == 1) && (BShape.size() == 1)) {
+      // Fill the output with value 0.
+      Value zeroIndex = rewriter.create<ConstantIndexOp>(loc, 0);
+      //Value index = rewriter.create<ConstantOp>(
+      //    loc, rewriter.getIntegerAttr(rewriter.getIndexType(), i));
+      rewriter.create<StoreOp>(loc, zero, alloc, zeroIndex);
+      //  Iterate along the reduction dimension.
+      //  Use a value from A.
+      auto reduceIterateOp = std::get<2>(
+          insertKrnlOps(loc, rewriter, AShape, A, {0}));
+
+      // Insert instructions into the reduction KrnlIterateOp.
+      Block &reduceIterationBlock = reduceIterateOp.bodyRegion().front();
+      rewriter.setInsertionPointToStart(&reduceIterationBlock);
+
+      // Induction variables
+      SmallVector<Value, 4> loopKIVs;
+      // K
+      loopKIVs.emplace_back(reduceIterationBlock.getArguments()[0]);
+
+      // Matmul computation
+      auto loadedA = rewriter.create<LoadOp>(loc, A, loopKIVs);
+      auto loadedB = rewriter.create<LoadOp>(loc, B, loopKIVs);
+      auto loadedY = rewriter.create<LoadOp>(loc, alloc, zeroIndex);
+      if (elementType.isa<IntegerType>()) {
+        auto AB = rewriter.create<MulIOp>(loc, loadedA, loadedB);
+        auto accumulated = rewriter.create<AddIOp>(loc, loadedY, AB);
+        rewriter.create<StoreOp>(loc, accumulated, alloc, zeroIndex);
+      } else if (elementType.isa<FloatType>()) {
+        auto AB = rewriter.create<MulFOp>(loc, loadedA, loadedB);
+        auto accumulated = rewriter.create<AddFOp>(loc, loadedY, AB);
+        rewriter.create<StoreOp>(loc, accumulated, alloc, zeroIndex);
+      }
     } else {
     }
 
