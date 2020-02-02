@@ -1348,6 +1348,9 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       SmallVector<Value, 4> allocOperands;
       if (AShape.size() >= 2 && BShape.size() >= 2) {
         // Both arguments are N-D, N >= 2
+        // (s1 x s2 x... x sK x M x K) MATMUL (K x N)
+        // =>
+        // (s1 x s2 x... x sK x M x N)
         for (int i = 0; i < memRefShape.size() - 2; ++i) {
           if (memRefShape[i] < 0) {
             if ((AShape.size() == 2) && (BShape.size() > 2))
@@ -1365,7 +1368,10 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
           allocOperands.emplace_back(dim);
         }
       } else if (AShape.size() == 1 && BShape.size() >= 2) {
-        //  Either argument is 1-D
+        // Either argument is 1-D
+        // K MATMUL (s1 x s2 x... x sK x K x N)
+        // =>
+        // (s1 x s2 x... x sK x N)
         for (int i = 0; i < memRefShape.size() - 1; ++i) {
           if (memRefShape[i] < 0) {
             auto dim = rewriter.create<DimOp>(loc, B, i);
@@ -1377,7 +1383,10 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
           allocOperands.emplace_back(dim);
         }
       } else if (AShape.size() >= 2 && BShape.size() == 1) {
-        //  Either argument is 1-D
+        // Either argument is 1-D
+        // (s1 x s2 x... x sK x M x K) MATMUL K
+        // =>
+        // (s1 x s2 x... x sK x M)
         for (int i = 0; i < memRefShape.size() - 1; ++i) {
           if (memRefShape[i] < 0) {
             auto dim = rewriter.create<DimOp>(loc, A, i);
@@ -1401,22 +1410,28 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       alloc = rewriter.create<AllocOp>(loc, memRefType, allocOperands);
     }
 
-    // Insert instructions.
-    if ((AShape.size() >= 2) && (BShape.size() >= 2)) {
-      // Define loops.
+    if (AShape.size() >= 2 || BShape.size() >= 2) {
+      // Cases 1 and 2:
+      // - Both arguments are N-D, N >= 2
+      // - Either argument is 1-D, the other is N-D, N >= 2
+
+      // Define loops for non-matrix-multiplication dimensions.
       KrnlDefineLoopsOp loopsOp;
       KrnlOptimizeLoopsOp optimizedLoopsOp;
+
       auto krnlOps = insertKrnlOps(loc, rewriter, memRefShape, alloc, {},
                                    /*includeIterateOp*/ false);
       loopsOp = std::get<0>(krnlOps);
       optimizedLoopsOp = std::get<1>(krnlOps);
 
+      // Outer KrnlIterateOp
       SmallVector<Value, 4> loopOuterIVs;
-      if ((AShape.size() > 2) || (BShape.size() > 2)) {
-        // Outer KrnlIterateOp
+      if (AShape.size() > 2 || BShape.size() > 2) {
         SmallVector<int, 4> outerAxes;
-        for (int i = 0; i < memRefShape.size() - 2; ++i)
+        int numResultDim = ((AShape.size() == 1 || BShape.size() == 1)) ? 1 : 2;
+        for (int i = 0; i < memRefShape.size() - numResultDim; ++i)
           outerAxes.emplace_back(i);
+
         auto outerPack =
             createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
                                      memRefShape, alloc, outerAxes, outerAxes);
@@ -1431,11 +1446,24 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
           loopOuterIVs.emplace_back(arg);
         }
       }
+
+      // Now, we define loops for matrix multiplication.
+
       // Create a KrnlIterateOp for matrix multiplication.
-      auto matmulPack =
-          createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                   memRefShape, alloc, {-1, -2}, {-1, -2});
-      auto matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, matmulPack);
+      KrnlIterateOp matmulIterateOp;
+      if (AShape.size() >= 2 && BShape.size() >= 2) {
+        // 2-D x 2-D. Result has two dimensions.
+        auto matmulPack =
+            createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                     memRefShape, alloc, {-1, -2}, {-1, -2});
+        matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, matmulPack);
+      } else {
+        // 1-D x 2-D, and vice versa. Result has one dimension.
+        auto matmulPack =
+            createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                     memRefShape, alloc, {-1}, {-1});
+        matmulIterateOp = rewriter.create<KrnlIterateOp>(loc, matmulPack);
+      }
 
       // Insert instructions into the matmul KrnlIterateOp.
       Block &matmulIterationBlock = matmulIterateOp.bodyRegion().front();
@@ -1475,14 +1503,19 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       if (AShape.size() > 2)
         for (auto arg : loopOuterIVs)
           loopOuterMKIVs.emplace_back(arg);
-      loopOuterMKIVs.emplace_back(loopMNIVs[0]);
+      if (AShape.size() >= 2)
+        loopOuterMKIVs.emplace_back(loopMNIVs[0]);
       loopOuterMKIVs.emplace_back(loopKIVs[0]);
       // KN
       if (BShape.size() > 2)
         for (auto arg : loopOuterIVs)
           loopOuterKNIVs.emplace_back(arg);
       loopOuterKNIVs.emplace_back(loopKIVs[0]);
-      loopOuterKNIVs.emplace_back(loopMNIVs[1]);
+      if (BShape.size() >= 2)
+        if (AShape.size() >= 2)
+          loopOuterKNIVs.emplace_back(loopMNIVs[1]);
+        else
+          loopOuterKNIVs.emplace_back(loopMNIVs[0]);
 
       // Matmul computation
       auto loadedA = rewriter.create<LoadOp>(loc, A, loopOuterMKIVs);
@@ -1498,6 +1531,9 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         rewriter.create<StoreOp>(loc, accumulated, alloc, loopOuterMNIVs);
       }
     } else if ((AShape.size() == 1) && (BShape.size() == 1)) {
+      // Case 3:
+      // - Both arguments are 1-D
+
       // Fill the output with value 0.
       Value zeroIndex = rewriter.create<ConstantIndexOp>(loc, 0);
       //Value index = rewriter.create<ConstantOp>(
@@ -1531,6 +1567,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         rewriter.create<StoreOp>(loc, accumulated, alloc, zeroIndex);
       }
     } else {
+      // No scalar matrix multiplication.
     }
 
     rewriter.replaceOp(op, alloc);
