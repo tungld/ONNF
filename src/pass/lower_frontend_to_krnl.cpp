@@ -1428,8 +1428,9 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       SmallVector<Value, 4> loopOuterIVs;
       if (AShape.size() > 2 || BShape.size() > 2) {
         SmallVector<int, 4> outerAxes;
-        int numResultDim = ((AShape.size() == 1 || BShape.size() == 1)) ? 1 : 2;
-        for (int i = 0; i < memRefShape.size() - numResultDim; ++i)
+        int matmulResultDims =
+            ((AShape.size() == 1 || BShape.size() == 1)) ? 1 : 2;
+        for (int i = 0; i < memRefShape.size() - matmulResultDims; ++i)
           outerAxes.emplace_back(i);
 
         auto outerPack =
@@ -1536,8 +1537,6 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
 
       // Fill the output with value 0.
       Value zeroIndex = rewriter.create<ConstantIndexOp>(loc, 0);
-      //Value index = rewriter.create<ConstantOp>(
-      //    loc, rewriter.getIntegerAttr(rewriter.getIndexType(), i));
       rewriter.create<StoreOp>(loc, zero, alloc, zeroIndex);
       //  Iterate along the reduction dimension.
       //  Use a value from A.
