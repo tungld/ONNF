@@ -1249,13 +1249,14 @@ struct ONNXGemmOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto memRefType = getMemRefType(*op->result_type_begin());
     auto loc = op->getLoc();
 
     Value A, B, C;
     A = operands[0];
     B = operands[1];
     C = operands[2];
+
+    auto memRefType = getMemRefType(*op->result_type_begin());
 
     auto alphaAttr = FloatAttr::get(memRefType.getElementType(),
         llvm::dyn_cast<ONNXGemmOp>(op).alpha().convertToFloat());
