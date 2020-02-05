@@ -544,6 +544,15 @@ void ONNXGemmNoBiasOp::inferShapes() {
   getResult().setType(RankedTensorType::get(dims, lhsTy.getElementType()));
 }
 
+/// BatchNormalizationTestMode
+void ONNXBatchNormalizationTestModeOp::inferShapes() {
+  // Cannot infer shape if no shape exists.
+  if (!getOperand(0).getType().isa<RankedTensorType>())
+    return;
+  // The output tensor of the same shape as the input.
+  getResult().setType(getOperand(0).getType());
+}
+
 // TODO:
 //   Verify that matrix sizes are valid for multiplication and addition.
 //   Take into account the dimensionality of the matrix.
