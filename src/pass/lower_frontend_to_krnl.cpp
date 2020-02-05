@@ -43,6 +43,17 @@ static MemRefType convertTensorToMemRef(TensorType type) {
   return MemRefType::get(type.getShape(), type.getElementType());
 }
 
+/// Get the corresponding MemRefType of a given TensorType/MemRefType.
+static MemRefType getMemRefType(Type type) {
+  MemRefType memRefType;
+  auto tensorType = type.dyn_cast<TensorType>();
+  if (tensorType) {
+    memRefType = convertTensorToMemRef(tensorType);
+  } else {
+    memRefType = type.dyn_cast<MemRefType>();
+  }
+}
+
 /// Insert an allocation and deallocation for the given MemRefType.
 static Value insertAllocAndDealloc(MemRefType type, Location loc,
                                    PatternRewriter &rewriter,
@@ -728,11 +739,11 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
     // TODO: Check that the types are valid.
     // An element-wise unary operation must have all operands and the result of
     // the same type. This should have been verified by the verifier.
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
+    auto memRefType = getMemRefType(*op->result_type_begin());
 
     // If the output has a dynamic dimension, pass the operands required for
     // each dynamic dimension to the AllocOp. The first operand of the
@@ -831,12 +842,11 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
     // TODO: Check that the types are valid.
     // An element-wise variadic operation must have all operands and the result
     // of the same type. This should have been verified by the verifier.
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
     auto loc = op->getLoc();
     auto numArgs = op->getNumOperands();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
+    auto memRefType = getMemRefType(*op->result_type_begin());
 
     Value alloc;
     bool insertDealloc = checkInsertDealloc(op);
@@ -944,8 +954,8 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     //                let exp_x = exp(x - max_x) in
     //                  let sum = sum(exp_x) in
     //                    exp_x / sum
-    auto tensorType = (*op->result_type_begin()).cast<RankedTensorType>();
-    int64_t rank = tensorType.getRank();
+    auto memRefType = getMemRefType(*op->result_type_begin());
+    int64_t rank = memRefType.getRank();
     int64_t axis = llvm::dyn_cast<ONNXSoftmaxOp>(op).axis().getSExtValue();
     axis = axis >= 0 ? axis : rank + axis;
     assert(axis >= -rank && axis <= rank - 1);
@@ -953,7 +963,6 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
     auto elementType = memRefType.getElementType();
 
     Value alloc;
@@ -1160,11 +1169,10 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
+    auto memRefType = getMemRefType(*op->result_type_begin());
     Value alloc;
 
     // Compute size in bytes.
@@ -1241,7 +1249,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+    auto memRefType = getMemRefType(*op->result_type_begin());
     auto loc = op->getLoc();
 
     Value A, B, C;
@@ -1249,18 +1257,15 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     B = operands[1];
     C = operands[2];
 
-    auto alphaAttr = FloatAttr::get(tensorType.getElementType(),
+    auto alphaAttr = FloatAttr::get(memRefType.getElementType(),
         llvm::dyn_cast<ONNXGemmOp>(op).alpha().convertToFloat());
-    auto betaAttr = FloatAttr::get(tensorType.getElementType(),
+    auto betaAttr = FloatAttr::get(memRefType.getElementType(),
         llvm::dyn_cast<ONNXGemmOp>(op).beta().convertToFloat());
     auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
     auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
 
     bool isTransA = (llvm::dyn_cast<ONNXGemmOp>(op).transA() != 0);
     bool isTransB = (llvm::dyn_cast<ONNXGemmOp>(op).transB() != 0);
-
-    // Result type
-    auto memRefType = convertTensorToMemRef(tensorType);
 
     // Insert an allocation and deallocation for the result of this operation.
     Value alloc;
@@ -1455,8 +1460,8 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
-    int outRank = tensorType.getRank();
+    auto memRefType = getMemRefType(*op->result_type_begin());
+    int outRank = memRefType.getRank();
 
     // Assume that `axes` has been validated by shape inference.
     // So, here we just get it.
@@ -1469,7 +1474,6 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
     }
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
     Value alloc;
 
     // Compute size in bytes.
@@ -1526,10 +1530,9 @@ struct ONNXTransposeOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
     auto loc = op->getLoc();
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
+    auto memRefType = getMemRefType(*op->result_type_begin());
     Value alloc;
     bool insertDealloc = checkInsertDealloc(op);
 
