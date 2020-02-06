@@ -189,7 +189,8 @@ private:
     }
 
     mlir::Type elementType =
-        convertONNXTypeToMLIRType(input.type().tensor_type().elem_type());
+        convertONNXTypeToMLIRType(static_cast<onnx::TensorProto::DataType>(
+            input.type().tensor_type().elem_type()));
     llvm::ArrayRef<int64_t> tensor_dims(dims.data(), dims.size());
     arg_types.emplace_back(
         mlir::RankedTensorType::get(tensor_dims, elementType));
@@ -445,7 +446,7 @@ private:
                                                                nOuts);
     } else {
       // Training mode with four trailing optional outputs. Not handled yet.
-      ImportNodeMultipleOuts<mlir::ONNXMaxPoolOp>(node, nIn, nOuts);
+      ImportNodeMultipleOuts<mlir::ONNXBatchNormalizationOp>(node, nIn, nOuts);
     }
   }
 
