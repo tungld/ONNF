@@ -227,7 +227,8 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
-// Create an iterate operand pack for KrnlIterateOp
+// Create an iterate operand pack for KrnlIterateOp whose induction variables
+// are picked up from the output of KrnlDefineLoopsOp and KrnlOptimizeLoopsOp.
 KrnlIterateOperandPack createIterateOperandPack(
     Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
     KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
@@ -235,11 +236,18 @@ KrnlIterateOperandPack createIterateOperandPack(
   // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
   // supported.
   //
-  // If `loopsAxes` is given, only iterate along those axes of the loopsOp's
-  // result. By default, iterating along all axes.
+  // `loopsAxes` is a list of axes of induction variables in the output of
+  // KrnlDefineLoopsOp and KrnlOptimizeLoopsOp. By default, use all induction
+  // variables (all axes).
   //
-  // If `axes` is given, only iterate along those axes of `memRefShape` and
-  // `operand`. By default, iterating along all axes.
+  // `axes` is a list of axes in `memRefShape` and `operand`, which will be used
+  // to get upper bounds for induction variables in `loopsAxes`.
+  // - If memRefShape[axis] < 0 (unknown), then get a upper bound from the
+  // operand's dimension of the same axis.
+  // - Otherwise, get from memRefShape[axis].
+  // By default, use all axes in the `memRefShape`.
+  //
+  // Relationship between `loopsAxes` and `axes` is bijective. Order matters.
   //
 
   auto loopsOpResult = loopsOp.getResults();
@@ -248,48 +256,46 @@ KrnlIterateOperandPack createIterateOperandPack(
   // Number of induction variables.
   int numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
 
-  // Create a sorted vector of loops axes.
-  SmallVector<int, 4> sortedLoopsAxes;
+  // Create a vector of loops axes.
+  SmallVector<int, 4> actualLoopsAxes;
   if (loopsAxes.empty()) {
     for (int i = 0; i < numIVs; ++i) {
-      sortedLoopsAxes.emplace_back(i);
+      actualLoopsAxes.emplace_back(i);
     }
   } else {
     for (int i = 0; i < numIVs; ++i) {
       int axis = (loopsAxes[i] >= 0) ? loopsAxes[i]
                                      : (loopsOpResult.size() + loopsAxes[i]);
-      sortedLoopsAxes.emplace_back(axis);
+      actualLoopsAxes.emplace_back(axis);
     }
-    std::sort(sortedLoopsAxes.begin(), sortedLoopsAxes.end());
   }
 
-  // Create a sorted vector of axes.
-  SmallVector<int, 4> sortedAxes;
+  // Create a vector of axes.
+  SmallVector<int, 4> actualAxes;
   if (axes.empty()) {
-    for (int i = 0; i < numIVs; ++i) {
-      sortedAxes.emplace_back(i);
+    for (int i = 0; i < memRefShape.size(); ++i) {
+      actualAxes.emplace_back(i);
     }
   } else {
-    for (int i = 0; i < numIVs; ++i) {
+    for (int i = 0; i < axes.size(); ++i) {
       int axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
-      sortedAxes.emplace_back(axis);
+      actualAxes.emplace_back(axis);
     }
-    std::sort(sortedAxes.begin(), sortedAxes.end());
   }
-  assert((sortedAxes.size() == sortedLoopsAxes.size()) && "Invalid Arguments");
+  assert((actualAxes.size() == actualLoopsAxes.size()) && "Invalid Arguments");
 
   // Create vectors of induction variables.
   std::vector<Value> originalLoops, optimizedLoops;
   originalLoops.reserve(numIVs);
   optimizedLoops.reserve(numIVs);
-  for (int i : sortedLoopsAxes) {
+  for (int i : actualLoopsAxes) {
     originalLoops.push_back(loopsOpResult[i]);
     optimizedLoops.push_back(optimizedLoopsOpResult[i]);
   }
 
   // Create an operand pack.
   KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-  for (int i : sortedAxes) {
+  for (int i : actualAxes) {
     if (memRefShape[i] < 0) {
       pack.pushConstantBound(0);
       pack.pushOperandBound(
