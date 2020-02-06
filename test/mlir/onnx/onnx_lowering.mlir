@@ -813,7 +813,7 @@ func @test_batchnorm_testmode_Nd(%arg0: tensor<1x2x1x3xf32>, %arg1: tensor<2xf32
   // CHECK:     [[NORM:%.+]] = divf [[DIVIDEND]], [[DIVISOR]] : f32
   // CHECK:     [[SCALE_NORM:%.+]] = mulf [[SCALE]], [[NORM]] : f32
   // CHECK:     [[SHIFT_SCALE_NORM:%.+]] = addf [[SCALE_NORM]], [[BIAS]] : f32
-  // CHECK:     store [[SHIFT_SCALE_NORM:%.+]], [[RES]][%arg6, %arg5, %arg7, %arg8] : memref<1x2x1x3xf32>
+  // CHECK:     store [[SHIFT_SCALE_NORM]], [[RES]][%arg6, %arg5, %arg7, %arg8] : memref<1x2x1x3xf32>
   // CHECK:   }
   // CHECK: }
   // CHECK: return [[RES]] : memref<1x2x1x3xf32>
@@ -843,7 +843,7 @@ func @test_batchnorm_testmode_1d(%arg0: tensor<10xf32>, %arg1: tensor<1xf32>, %a
   // CHECK:   [[NORM:%.+]] = divf [[DIVIDEND]], [[DIVISOR]] : f32
   // CHECK:   [[SCALE_NORM:%.+]] = mulf [[SCALE]], [[NORM]] : f32
   // CHECK:   [[SHIFT_SCALE_NORM:%.+]] = addf [[SCALE_NORM]], [[BIAS]] : f32
-  // CHECK:   store [[SHIFT_SCALE_NORM:%.+]], [[RES]][%arg5] : memref<10xf32>
+  // CHECK:   store [[SHIFT_SCALE_NORM]], [[RES]][%arg5] : memref<10xf32>
   // CHECK: }
   // CHECK: return [[RES]] : memref<10xf32>
 }
