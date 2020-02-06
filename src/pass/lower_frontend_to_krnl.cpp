@@ -227,6 +227,130 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
+// Create an iterate operand pack for KrnlIterateOp whose induction variables
+// are picked up from the output of KrnlDefineLoopsOp and KrnlOptimizeLoopsOp.
+KrnlIterateOperandPack createIterateOperandPack(
+    Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
+    KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
+    Value operand, ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
+  // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
+  // supported.
+  //
+  // `loopsAxes` is a list of axes of induction variables in the output of
+  // KrnlDefineLoopsOp and KrnlOptimizeLoopsOp. By default, use all induction
+  // variables (all axes).
+  //
+  // `axes` is a list of axes in `memRefShape` and `operand`, which will be used
+  // to get upper bounds for induction variables in `loopsAxes`.
+  // - If memRefShape[axis] < 0 (unknown), then get a upper bound from the
+  // operand's dimension of the same axis.
+  // - Otherwise, get from memRefShape[axis].
+  // By default, use all axes in the `memRefShape`.
+  //
+  // Relationship between `loopsAxes` and `axes` is bijective. Order matters.
+  //
+
+  auto loopsOpResult = loopsOp.getResults();
+  auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
+
+  // Number of induction variables.
+  int numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
+
+  // Create a vector of loops axes.
+  SmallVector<int, 4> actualLoopsAxes;
+  if (loopsAxes.empty()) {
+    for (int i = 0; i < numIVs; ++i) {
+      actualLoopsAxes.emplace_back(i);
+    }
+  } else {
+    for (int i = 0; i < numIVs; ++i) {
+      int axis = (loopsAxes[i] >= 0) ? loopsAxes[i]
+                                     : (loopsOpResult.size() + loopsAxes[i]);
+      actualLoopsAxes.emplace_back(axis);
+    }
+  }
+
+  // Create a vector of axes.
+  SmallVector<int, 4> actualAxes;
+  if (axes.empty()) {
+    for (int i = 0; i < memRefShape.size(); ++i) {
+      actualAxes.emplace_back(i);
+    }
+  } else {
+    for (int i = 0; i < axes.size(); ++i) {
+      int axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
+      actualAxes.emplace_back(axis);
+    }
+  }
+  assert((actualAxes.size() == actualLoopsAxes.size()) && "Invalid Arguments");
+
+  // Create vectors of induction variables.
+  std::vector<Value> originalLoops, optimizedLoops;
+  originalLoops.reserve(numIVs);
+  optimizedLoops.reserve(numIVs);
+  for (int i : actualLoopsAxes) {
+    originalLoops.push_back(loopsOpResult[i]);
+    optimizedLoops.push_back(optimizedLoopsOpResult[i]);
+  }
+
+  // Create an operand pack.
+  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+  for (int i : actualAxes) {
+    if (memRefShape[i] < 0) {
+      pack.pushConstantBound(0);
+      pack.pushOperandBound(
+          rewriter.create<DimOp>(loc, operand, i).getResult());
+    } else {
+      pack.pushConstantBound(0);
+      pack.pushConstantBound(memRefShape[i]);
+    }
+  }
+
+  return pack;
+}
+
+// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp.
+std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
+insertKrnlOps(Location loc, PatternRewriter &rewriter,
+              ArrayRef<int64_t> memRefShape, Value operand,
+              ArrayRef<int> axes = {}, bool includeIterateOp = true) {
+  // If a dimension is unknown, get its value of a corresponding given operand.
+  //
+  // If `axes` is given, only iterate along those axes of the memRefShape. By
+  // default, iterating along all axes. `axes` is a list of non-duplicated ints.
+  // Negative axis is supported.
+  //
+  // There is no optimization in the KrnlOptimizeLoopsOp.
+
+  // Number of induction variables.
+  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+
+  // Define loops.
+  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
+  // Define loop optimization.
+  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
+  // Create a KrnlIterateOp
+  KrnlIterateOp iterateOp;
+  if (includeIterateOp) {
+    SmallVector<int, 4> loopsAxes;
+    for (int i = 0; i < axes.size(); ++i)
+      loopsAxes.emplace_back(i);
+    iterateOp = rewriter.create<KrnlIterateOp>(
+        loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                      memRefShape, operand, loopsAxes, axes));
+  }
+
+  // No optimization
+  rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
+  rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
+  if (includeIterateOp)
+    rewriter.setInsertionPointAfter(iterateOp);
+  else
+    rewriter.setInsertionPointAfter(optimizedLoopsOp);
+
+  return std::make_tuple(loopsOp, optimizedLoopsOp, iterateOp);
+}
+
 namespace {
 
 template <typename ElementwiseNaryOp>
@@ -1638,6 +1762,92 @@ struct ONNXIdentityOpLowering : public ConversionPattern {
   }
 };
 
+struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
+  ONNXBatchNormalizationTestModeOpLowering(MLIRContext *ctx)
+      : ConversionPattern(
+            mlir::ONNXBatchNormalizationTestModeOp::getOperationName(), 1,
+            ctx) {}
+  PatternMatchResult matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+      ConversionPatternRewriter & rewriter) const final {
+    // batchnorm{epsilon}(x, scale, bias, mean, variance) =
+    //      scale * (x - mean) / sqrt(variance + epsilon) + bias
+
+    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+    auto loc = op->getLoc();
+
+    auto epsilonAttr =
+        FloatAttr::get(tensorType.getElementType(),
+                       llvm::dyn_cast<ONNXBatchNormalizationTestModeOp>(op)
+                           .epsilon()
+                           .convertToFloat());
+    auto epsilon = rewriter.create<ConstantOp>(loc, epsilonAttr);
+
+    auto operand = operands[0];
+    auto scale = operands[1];
+    auto bias = operands[2];
+    auto mean = operands[3];
+    auto variance = operands[4];
+
+    // Insert an allocation and deallocation for the result of this operation.
+    auto memRefType = convertTensorToMemRef(tensorType);
+
+    Value alloc;
+    bool insertDealloc = checkInsertDealloc(op);
+
+    if (hasAllConstantDimensions(memRefType))
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
+    else
+      alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc,
+                                    {operand});
+
+    // Operand's dimensions can be in the form of NxCxD1xD2x...xDn or N.
+    // In case of N, C is assumed to be 1.
+    // Shapes of scale, bias, mean and variance must be C.
+    // Computation of BatchNormalization is done as if scale, bias, mean, and
+    // variance are reshaped to Cx1x1x...x1.
+
+    auto iterateOp = std::get<2>(
+        insertKrnlOps(loc, rewriter, memRefType.getShape(), operand));
+    Block &iterationBlock = iterateOp.bodyRegion().front();
+
+    // Insert instructions inside the KrnlIterateOp body.
+    rewriter.setInsertionPointToStart(&iterationBlock);
+
+    SmallVector<Value, 4> loopIVs;
+    for (auto arg : iterationBlock.getArguments())
+      loopIVs.emplace_back(arg);
+
+    SmallVector<Value, 1> loopCIVs;
+    if (loopIVs.size() > 1) {
+      loopCIVs.emplace_back(loopIVs[1]);
+    }
+
+    auto xVal = rewriter.create<LoadOp>(loc, operand, loopIVs);
+    auto scaleVal = rewriter.create<LoadOp>(loc, scale, loopCIVs);
+    auto biasVal = rewriter.create<LoadOp>(loc, bias, loopCIVs);
+    auto meanVal = rewriter.create<LoadOp>(loc, mean, loopCIVs);
+    auto varianceVal = rewriter.create<LoadOp>(loc, variance, loopCIVs);
+
+    // normalize
+    auto dividend = rewriter.create<SubFOp>(loc, xVal, meanVal);
+    auto adjustedVarianceVal =
+        rewriter.create<AddFOp>(loc, varianceVal, epsilon);
+    auto divisor = rewriter.create<DivFOp>(loc, scaleVal, meanVal);
+    //auto divisor = rewriter.create<KrnlSqrtOp>(loc, memRefType.getElementType(),
+    //                                           adjustedVarianceVal);
+    auto normVal = rewriter.create<DivFOp>(loc, dividend, divisor);
+    // scale and shift
+    auto scaleNormVal = rewriter.create<MulFOp>(loc, scaleVal, normVal);
+    auto shiftScaleNormVal =
+        rewriter.create<AddFOp>(loc, scaleNormVal, biasVal);
+    rewriter.create<StoreOp>(loc, shiftScaleNormVal, alloc, loopIVs);
+
+    rewriter.replaceOp(op, alloc);
+
+    return matchSuccess();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
 //===----------------------------------------------------------------------===//
@@ -1769,6 +1979,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXReshapeOpLowering, ONNXEntryPointLowering,
                   ONNXSoftmaxOpLowering, ONNXGemmOpLowering,
                   ONNXUnsqueezeOpLowering, ONNXTransposeOpLowering,
+                  ONNXBatchNormalizationTestModeOpLowering,
                   ONNXIdentityOpLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the
