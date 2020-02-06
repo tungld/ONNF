@@ -1826,6 +1826,8 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
       rewriter.setInsertionPointToStart(&cIterationBlock);
       for (auto arg : cIterationBlock.getArguments())
         loopCIVs.emplace_back(arg);
+    } else {
+       loopCIVs.emplace_back(rewriter.create<ConstantIndexOp>(loc, 0));
     }
 
     auto scaleVal = rewriter.create<LoadOp>(loc, scale, loopCIVs);
