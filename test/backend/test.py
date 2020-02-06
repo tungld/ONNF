@@ -204,6 +204,10 @@ test_to_enable = [
 
     # Sign Op:
     "test_sign_cpu",
+
+    # BatchNormalization (test mode)
+    "test_batchnorm_epsilon_cpu",
+    "test_batchnorm_example_cpu",
 ]
 
 # Extract name of all test cases.
