@@ -1806,35 +1806,63 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
     // Computation of BatchNormalization is done as if scale, bias, mean, and
     // variance are reshaped to Cx1x1x...x1.
 
-    auto iterateOp = std::get<2>(
-        insertKrnlOps(loc, rewriter, memRefType.getShape(), operand));
-    Block &iterationBlock = iterateOp.bodyRegion().front();
+    auto krnlOps =
+        insertKrnlOps(loc, rewriter, memRefType.getShape(), operand, {},
+                      /*includeIterateOp*/ false);
+    auto loopsOp = std::get<0>(krnlOps);
+    auto optimizedLoopsOp = std::get<1>(krnlOps);
 
-    // Insert instructions inside the KrnlIterateOp body.
-    rewriter.setInsertionPointToStart(&iterationBlock);
-
-    SmallVector<Value, 4> loopIVs;
-    for (auto arg : iterationBlock.getArguments())
-      loopIVs.emplace_back(arg);
+    // Create a KrnlIterateOp along C dimension.
+    // This will be the outer-most loop in order to re-use scale, bias,
+    // mean and variance.
 
     SmallVector<Value, 1> loopCIVs;
-    if (loopIVs.size() > 1) {
-      loopCIVs.emplace_back(loopIVs[1]);
+    if (memRefType.getShape().size() > 1) {
+      auto cPack =
+          createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                   memRefType.getShape(), operand, {1}, {1});
+      auto cIterateOp = rewriter.create<KrnlIterateOp>(loc, cPack);
+      Block &cIterationBlock = cIterateOp.bodyRegion().front();
+      rewriter.setInsertionPointToStart(&cIterationBlock);
+      for (auto arg : cIterationBlock.getArguments())
+        loopCIVs.emplace_back(arg);
     }
 
-    auto xVal = rewriter.create<LoadOp>(loc, operand, loopIVs);
     auto scaleVal = rewriter.create<LoadOp>(loc, scale, loopCIVs);
     auto biasVal = rewriter.create<LoadOp>(loc, bias, loopCIVs);
     auto meanVal = rewriter.create<LoadOp>(loc, mean, loopCIVs);
     auto varianceVal = rewriter.create<LoadOp>(loc, variance, loopCIVs);
 
+    // Create a KrnlIterateOp along the other dimensions.
+    SmallVector<int, 4> axes;
+    axes.emplace_back(0);
+    for (int i = 2; i < memRefType.getShape().size(); ++i)
+      axes.emplace_back(i);
+    auto pack =
+        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                 memRefType.getShape(), operand, axes, axes);
+    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+    Block &iterationBlock = iterateOp.bodyRegion().front();
+    rewriter.setInsertionPointToStart(&iterationBlock);
+
+    SmallVector<Value, 4> loopIVs;
+    auto args = iterationBlock.getArguments();
+    if (args.size() > 1) {
+      loopIVs.emplace_back(args[0]);
+      loopIVs.emplace_back(loopCIVs[0]); // Insert C back.
+      for (int i = 1; i < args.size(); ++i)
+        loopIVs.emplace_back(args[i]);
+    } else {
+      loopIVs.emplace_back(args[0]);
+    }
+
+    auto xVal = rewriter.create<LoadOp>(loc, operand, loopIVs);
     // normalize
     auto dividend = rewriter.create<SubFOp>(loc, xVal, meanVal);
     auto adjustedVarianceVal =
         rewriter.create<AddFOp>(loc, varianceVal, epsilon);
-    auto divisor = rewriter.create<DivFOp>(loc, scaleVal, meanVal);
-    //auto divisor = rewriter.create<KrnlSqrtOp>(loc, memRefType.getElementType(),
-    //                                           adjustedVarianceVal);
+    auto divisor = rewriter.create<KrnlSqrtOp>(loc, memRefType.getElementType(),
+                                               adjustedVarianceVal);
     auto normVal = rewriter.create<DivFOp>(loc, dividend, divisor);
     // scale and shift
     auto scaleNormVal = rewriter.create<MulFOp>(loc, scaleVal, normVal);
