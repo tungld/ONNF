@@ -227,75 +227,71 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
-// Create an iterate operand pack for KrnlIterateOp whose induction variables
-// are picked up from the output of KrnlDefineLoopsOp and KrnlOptimizeLoopsOp.
+// Create an iterate operand pack for KrnlIterateOp
 KrnlIterateOperandPack createIterateOperandPack(
     Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
     KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
-    Value operand, ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
+    Value operand, ArrayRef<int64_t> loopsAxes = {},
+    ArrayRef<int64_t> axes = {}) {
   // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
   // supported.
   //
-  // `loopsAxes` is a list of axes of induction variables in the output of
-  // KrnlDefineLoopsOp and KrnlOptimizeLoopsOp. By default, use all induction
-  // variables (all axes).
+  // If `loopsAxes` is given, only iterate along those axes of the loopsOp's
+  // result. By default, iterating along all axes.
   //
-  // `axes` is a list of axes in `memRefShape` and `operand`, which will be used
-  // to get upper bounds for induction variables in `loopsAxes`.
-  // - If memRefShape[axis] < 0 (unknown), then get a upper bound from the
-  // operand's dimension of the same axis.
-  // - Otherwise, get from memRefShape[axis].
-  // By default, use all axes in the `memRefShape`.
-  //
-  // Relationship between `loopsAxes` and `axes` is bijective. Order matters.
+  // If `axes` is given, only iterate along those axes of `memRefShape` and
+  // `operand`. By default, iterating along all axes.
   //
 
   auto loopsOpResult = loopsOp.getResults();
   auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
 
   // Number of induction variables.
-  int numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
+  int64_t numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
 
-  // Create a vector of loops axes.
-  SmallVector<int, 4> actualLoopsAxes;
+  // Create a sorted vector of loops axes.
+  SmallVector<int64_t, 4> sortedLoopsAxes;
   if (loopsAxes.empty()) {
-    for (int i = 0; i < numIVs; ++i) {
-      actualLoopsAxes.emplace_back(i);
+    for (int64_t i = 0; i < numIVs; ++i) {
+      sortedLoopsAxes.emplace_back(i);
     }
   } else {
-    for (int i = 0; i < numIVs; ++i) {
-      int axis = (loopsAxes[i] >= 0) ? loopsAxes[i]
-                                     : (loopsOpResult.size() + loopsAxes[i]);
-      actualLoopsAxes.emplace_back(axis);
+    for (int64_t i = 0; i < numIVs; ++i) {
+      int64_t axis = (loopsAxes[i] >= 0)
+                         ? loopsAxes[i]
+                         : (loopsOpResult.size() + loopsAxes[i]);
+      sortedLoopsAxes.emplace_back(axis);
     }
+    std::sort(sortedLoopsAxes.begin(), sortedLoopsAxes.end());
   }
 
-  // Create a vector of axes.
-  SmallVector<int, 4> actualAxes;
+  // Create a sorted vector of axes.
+  SmallVector<int64_t, 4> sortedAxes;
   if (axes.empty()) {
-    for (int i = 0; i < memRefShape.size(); ++i) {
-      actualAxes.emplace_back(i);
+    for (int64_t i = 0; i < numIVs; ++i) {
+      sortedAxes.emplace_back(i);
     }
   } else {
-    for (int i = 0; i < axes.size(); ++i) {
-      int axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
-      actualAxes.emplace_back(axis);
+    for (int64_t i = 0; i < numIVs; ++i) {
+      int64_t axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
+      sortedAxes.emplace_back(axis);
     }
+    std::sort(sortedAxes.begin(), sortedAxes.end());
   }
-  assert((actualAxes.size() == actualLoopsAxes.size()) && "Invalid Arguments");
+  assert((sortedAxes.size() == sortedLoopsAxes.size()) && "Invalid Arguments");
 
   // Create vectors of induction variables.
   std::vector<Value> originalLoops, optimizedLoops;
   originalLoops.reserve(numIVs);
   optimizedLoops.reserve(numIVs);
-  for (int i : actualLoopsAxes) {
+  for (auto i : sortedLoopsAxes) {
     originalLoops.push_back(loopsOpResult[i]);
     optimizedLoops.push_back(optimizedLoopsOpResult[i]);
   }
 
   // Create an operand pack.
   KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-  for (int i : actualAxes) {
+  for (auto i : sortedAxes) {
     if (memRefShape[i] < 0) {
       pack.pushConstantBound(0);
       pack.pushOperandBound(
@@ -313,7 +309,7 @@ KrnlIterateOperandPack createIterateOperandPack(
 std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
 insertKrnlOps(Location loc, PatternRewriter &rewriter,
               ArrayRef<int64_t> memRefShape, Value operand,
-              ArrayRef<int> axes = {}, bool includeIterateOp = true) {
+              ArrayRef<int64_t> axes = {}, bool includeIterateOp = true) {
   // If a dimension is unknown, get its value of a corresponding given operand.
   //
   // If `axes` is given, only iterate along those axes of the memRefShape. By
@@ -323,7 +319,7 @@ insertKrnlOps(Location loc, PatternRewriter &rewriter,
   // There is no optimization in the KrnlOptimizeLoopsOp.
 
   // Number of induction variables.
-  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+  int64_t numIVs = axes.empty() ? memRefShape.size() : axes.size();
 
   // Define loops.
   auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
@@ -332,8 +328,8 @@ insertKrnlOps(Location loc, PatternRewriter &rewriter,
   // Create a KrnlIterateOp
   KrnlIterateOp iterateOp;
   if (includeIterateOp) {
-    SmallVector<int, 4> loopsAxes;
-    for (int i = 0; i < axes.size(); ++i)
+    SmallVector<int64_t, 4> loopsAxes;
+    for (int64_t i = 0; i < axes.size(); ++i)
       loopsAxes.emplace_back(i);
     iterateOp = rewriter.create<KrnlIterateOp>(
         loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
@@ -1836,9 +1832,9 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
     auto varianceVal = rewriter.create<LoadOp>(loc, variance, loopCIVs);
 
     // Create a KrnlIterateOp along the other dimensions.
-    SmallVector<int, 4> axes;
+    SmallVector<int64_t, 4> axes;
     axes.emplace_back(0);
-    for (int i = 2; i < memRefType.getShape().size(); ++i)
+    for (int64_t i = 2; i < memRefType.getShape().size(); ++i)
       axes.emplace_back(i);
     auto pack =
         createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
