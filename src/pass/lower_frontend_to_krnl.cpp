@@ -37,21 +37,18 @@ static bool hasAllConstantDimensions(MemRefType type) {
   return true;
 }
 
-/// Convert the given TensorType into the corresponding MemRefType.
-static MemRefType convertTensorToMemRef(TensorType type) {
-  assert(type.hasRank() && "expected only ranked shapes");
-  return MemRefType::get(type.getShape(), type.getElementType());
-}
-
 /// Get the corresponding MemRefType of a given TensorType/MemRefType.
-static MemRefType getMemRefType(Type type) {
+static MemRefType convertToMemRefType(Type type) {
   MemRefType memRefType;
   auto tensorType = type.dyn_cast<TensorType>();
   if (tensorType) {
-    memRefType = convertTensorToMemRef(tensorType);
+    assert(tensorType.hasRank() && "expected only ranked shapes");
+    memRefType =
+        MemRefType::get(tensorType.getShape(), tensorType.getElementType());
   } else {
     memRefType = type.dyn_cast<MemRefType>();
   }
+  return memRefType;
 }
 
 /// Insert an allocation and deallocation for the given MemRefType.
@@ -743,7 +740,7 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
 
     // If the output has a dynamic dimension, pass the operands required for
     // each dynamic dimension to the AllocOp. The first operand of the
@@ -846,7 +843,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
     auto numArgs = op->getNumOperands();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
 
     Value alloc;
     bool insertDealloc = checkInsertDealloc(op);
@@ -954,7 +951,7 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
     //                let exp_x = exp(x - max_x) in
     //                  let sum = sum(exp_x) in
     //                    exp_x / sum
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
     int64_t rank = memRefType.getRank();
     int64_t axis = llvm::dyn_cast<ONNXSoftmaxOp>(op).axis().getSExtValue();
     axis = axis >= 0 ? axis : rank + axis;
@@ -1172,7 +1169,7 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
     Value alloc;
 
     // Compute size in bytes.
@@ -1256,7 +1253,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     B = operands[1];
     C = operands[2];
 
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
 
     auto alphaAttr = FloatAttr::get(memRefType.getElementType(),
         llvm::dyn_cast<ONNXGemmOp>(op).alpha().convertToFloat());
@@ -1461,7 +1458,7 @@ struct ONNXUnsqueezeOpLowering : public ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
     int outRank = memRefType.getRank();
 
     // Assume that `axes` has been validated by shape inference.
@@ -1533,7 +1530,7 @@ struct ONNXTransposeOpLowering : public ConversionPattern {
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = getMemRefType(*op->result_type_begin());
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
     Value alloc;
     bool insertDealloc = checkInsertDealloc(op);
 
@@ -1671,8 +1668,8 @@ struct TensorTypeConverter : public TypeConverter {
   using TypeConverter::TypeConverter;
 
   LogicalResult convertType(Type t, SmallVectorImpl<Type> &results) override {
-    if (auto tensor_type = t.dyn_cast<TensorType>()) {
-      results.push_back(convertTensorToMemRef(tensor_type));
+    if (auto type = convertToMemRefType(t)) {
+      results.push_back(type);
       return success();
     }
 
