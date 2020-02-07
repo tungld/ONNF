@@ -231,8 +231,8 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
 // are picked up from the output of KrnlDefineLoopsOp and KrnlOptimizeLoopsOp.
 KrnlIterateOperandPack createIterateOperandPack(
     Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
-    KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
-    Value operand, ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
+    KrnlOptimizeLoopsOp optimizedLoopsOp, Value operand,
+    ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
   // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
   // supported.
   //
@@ -240,18 +240,16 @@ KrnlIterateOperandPack createIterateOperandPack(
   // KrnlDefineLoopsOp and KrnlOptimizeLoopsOp. By default, use all induction
   // variables (all axes).
   //
-  // `axes` is a list of axes in `memRefShape` and `operand`, which will be used
-  // to get upper bounds for induction variables in `loopsAxes`.
-  // - If memRefShape[axis] < 0 (unknown), then get a upper bound from the
-  // operand's dimension of the same axis.
-  // - Otherwise, get from memRefShape[axis].
-  // By default, use all axes in the `memRefShape`.
+  // `axes` is a list of axes in the operand's shape, which will be used
+  // to get upper bounds for corresponding induction variables in `loopsAxes`.
+  // By default, use all axes in the operandShape.
   //
   // Relationship between `loopsAxes` and `axes` is bijective. Order matters.
   //
 
   auto loopsOpResult = loopsOp.getResults();
   auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
+  auto memRefShape = operand.getType().cast<MemRefType>().getShape();
 
   // Number of induction variables.
   int numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
@@ -309,19 +307,21 @@ KrnlIterateOperandPack createIterateOperandPack(
   return pack;
 }
 
-// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp.
+// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp
+// for loops over dimensions of the shape of an operand.
 std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
-insertKrnlOps(Location loc, PatternRewriter &rewriter,
-              ArrayRef<int64_t> memRefShape, Value operand,
-              ArrayRef<int> axes = {}, bool includeIterateOp = true) {
+insertKrnlLoopsAndIterateOps(Location loc, PatternRewriter &rewriter,
+                             Value operand, ArrayRef<int> axes = {},
+                             bool includeIterateOp = true) {
   // If a dimension is unknown, get its value of a corresponding given operand.
   //
-  // If `axes` is given, only iterate along those axes of the memRefShape. By
-  // default, iterating along all axes. `axes` is a list of non-duplicated ints.
-  // Negative axis is supported.
+  // If `axes` is given, only iterate along those axes of the operand's shape.
+  // By default, iterating along all axes. `axes` is a list of non-duplicated
+  // ints. Negative axis is supported.
   //
   // There is no optimization in the KrnlOptimizeLoopsOp.
 
+  auto memRefShape = operand.getType().cast<MemRefType>().getShape();
   // Number of induction variables.
   int numIVs = axes.empty() ? memRefShape.size() : axes.size();
 
@@ -337,7 +337,7 @@ insertKrnlOps(Location loc, PatternRewriter &rewriter,
       loopsAxes.emplace_back(i);
     iterateOp = rewriter.create<KrnlIterateOp>(
         loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                      memRefShape, operand, loopsAxes, axes));
+                                      operand, loopsAxes, axes));
   }
 
   // No optimization
@@ -874,8 +874,8 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
                                     {operands[0]});
 
     // Create a KrnlIterateOp.
-    KrnlIterateOp iterateOp = std::get<2>(
-        insertKrnlOps(loc, rewriter, memRefType.getShape(), operands[0]));
+    KrnlIterateOp iterateOp =
+        std::get<2>(insertKrnlLoopsAndIterateOps(loc, rewriter, operands[0]));
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Insert instructions inside the KrnlIterateOp body.
@@ -937,7 +937,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
 
     // Create a KrnlIterateOp.
     KrnlIterateOp iterateOp =
-        std::get<2>(insertKrnlOps(loc, rewriter, memRefType.getShape(), alloc));
+        std::get<2>(insertKrnlLoopsAndIterateOps(loc, rewriter, alloc));
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Insert instructions inside the KrnlIterateOp body.
@@ -1013,8 +1013,8 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
         FloatAttr::get(elementType, -std::numeric_limits<float>::infinity()));
 
     // Define loops.
-    auto krnlOps = insertKrnlOps(loc, rewriter, memRefShape, operands[0], {},
-                                 /*includeIterate*/ false);
+    auto krnlOps = insertKrnlLoopsAndIterateOps(loc, rewriter, operands[0], {},
+                                                /*includeIterateOp*/ false);
     KrnlDefineLoopsOp loopsOp = std::get<0>(krnlOps);
     KrnlOptimizeLoopsOp optimizedLoopsOp = std::get<1>(krnlOps);
 
@@ -1031,12 +1031,12 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
       else
         innerAxes.emplace_back(i);
     }
-    KrnlIterateOperandPack outerPack = createIterateOperandPack(
-        loc, rewriter, loopsOp, optimizedLoopsOp, memRefShape, operands[0],
-        outerAxes, outerAxes);
-    KrnlIterateOperandPack innerPack = createIterateOperandPack(
-        loc, rewriter, loopsOp, optimizedLoopsOp, memRefShape, operands[0],
-        innerAxes, innerAxes);
+    KrnlIterateOperandPack outerPack =
+        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                 operands[0], outerAxes, outerAxes);
+    KrnlIterateOperandPack innerPack =
+        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
+                                 operands[0], innerAxes, innerAxes);
 
     KrnlIterateOp outerIterateOp, maxIterateOp, sumIterateOp, softmaxIterateOp;
     SmallVector<Value, 4> outerLoopIVs;
@@ -1293,9 +1293,8 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // - Reduction loop iterates over the reduction dimension.
 
     // Outer loop
-    KrnlIterateOperandPack outerPack =
-        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                 memRefShape, alloc, {0, 1}, {0, 1});
+    KrnlIterateOperandPack outerPack = createIterateOperandPack(
+        loc, rewriter, loopsOp, optimizedLoopsOp, alloc, {0, 1}, {0, 1});
     // Reduction loop
     KrnlIterateOperandPack reductionPack(rewriter, {loopsOp.getResults()[2]},
                                          {optimizedLoopsOp.getResults()[2]});
