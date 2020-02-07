@@ -46,7 +46,7 @@ ShapeInferenceList=['Exp', 'Tanh', 'Sinh', 'Cosh', 'Sigmoid', 'Relu',
                    'Elu', 'Selu', 'HardSigmoid', 'Reshape', 'Reciprocal',
                    'Identity', 'Cos', 'Log', 'Transpose', 'Softmax',
                    'ReduceMax', 'ReduceMin', 'ReduceProd', 'ReduceSum',
-                   'Softplus', 'Softsign', 'Sqrt', 'Unsqueeze']
+                   'Softplus', 'Softsign', 'Sqrt', 'Unsqueeze', 'Sign']
 
 CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
                'ReduceLogSumExp', 'ReduceSumSquare']
