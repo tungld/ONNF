@@ -42,14 +42,14 @@ RankedTensorType getReductionOutputType(RankedTensorType operandTy,
         axes.emplace_back(axis);
     }
   } else {
-    for (int i = 0; i < rank; ++i) {
+    for (decltype(rank) i = 0; i < rank; ++i) {
       axes.emplace_back(i);
     }
   }
 
   // Mark reduction axes.
   SmallVector<bool, 4> isReductionAxis;
-  for (int i = 0; i < rank; ++i) {
+  for (decltype(rank) i = 0; i < rank; ++i) {
     if (std::find(axes.begin(), axes.end(), i) != axes.end())
       isReductionAxis.emplace_back(true);
     else
@@ -60,7 +60,7 @@ RankedTensorType getReductionOutputType(RankedTensorType operandTy,
   bool isKeepdims = (keepdims == 1) ? true : false;
 
   SmallVector<int64_t, 4> dims;
-  for (int i = 0; i < rank; ++i) {
+  for (decltype(rank) i = 0; i < rank; ++i) {
     if (isReductionAxis[i]) {
       if (isKeepdims)
         dims.emplace_back(1); // reduction dimension

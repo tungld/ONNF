@@ -133,22 +133,21 @@ static bool checkInsertDealloc(Operation *currentOp) {
 // Create a mapping from result type's dimensions to input type's dimensions,
 // given that the result type is the result of a reduction op over the input
 // type.
-std::map<int, int> getReductionMapping(MemRefType inputTy,
-                                               ArrayRef<int> axes,
-                                               bool keepdims) {
-  std::map<int, int> OutInDimMap;
+std::map<int64_t, int64_t>
+getReductionMapping(MemRefType inputTy, ArrayRef<int64_t> axes, bool keepdims) {
+  std::map<int64_t, int64_t> OutInDimMap;
   int64_t rank = inputTy.getRank();
 
   // Mark reduction axes.
   std::vector<bool> isReductionAxis;
-  for (int i = 0; i < rank; ++i) {
+  for (decltype(rank) i = 0; i < rank; ++i) {
     if (std::find(axes.begin(), axes.end(), i) != axes.end())
       isReductionAxis.push_back(true);
     else
       isReductionAxis.push_back(false);
   }
 
-  for (int inIndex = 0, outIndex = 0; inIndex < rank; ++inIndex) {
+  for (decltype(rank) inIndex = 0, outIndex = 0; inIndex < rank; ++inIndex) {
     // If it is a reduction axis, there is no relationship among dimensions.
     if (isReductionAxis[inIndex]) {
       if (keepdims)
@@ -1821,17 +1820,17 @@ struct ONNXReductionOpLowering : public ConversionPattern {
 
     // Get attributes
     ArrayAttr axisAttrs = llvm::dyn_cast<ONNXReductionOp>(op).axesAttr();
-    std::vector<int> axes;
+    std::vector<int64_t> axes;
     if (axisAttrs) {
       for (auto axisAttr : axisAttrs.getValue()) {
-        int axis = axisAttr.cast<IntegerAttr>().getInt();
+        int64_t axis = axisAttr.cast<IntegerAttr>().getInt();
         axis = axis >= 0 ? axis : (inRank + axis);
         assert(axis >= -inRank && axis <= inRank - 1);
         if (std::find(axes.begin(), axes.end(), axis) == axes.end())
           axes.push_back(axis);
       }
     } else {
-      for (int i = 0; i < inRank; ++i) {
+      for (decltype(inRank) i = 0; i < inRank; ++i) {
         axes.push_back(i);
       }
     }
@@ -1844,7 +1843,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     auto memRefOutType = convertTensorToMemRef(tensorOutType);
     auto memRefOutShape = memRefOutType.getShape();
     auto elementOutType = memRefOutType.getElementType();
-    std::map<int, int> outInDimMap =
+    std::map<int64_t, int64_t> outInDimMap =
         getReductionMapping(memRefInType, axes, isKeepdims);
 
     // Insert an allocation and deallocation for the result of this operation.
@@ -1854,7 +1853,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
       alloc = insertAllocAndDealloc(memRefOutType, loc, rewriter, insertDealloc);
     } else {
       SmallVector<Value, 2> allocOperands;
-      for (int i = 0; i < outRank; ++i) {
+      for (decltype(outRank) i = 0; i < outRank; ++i) {
         if (memRefOutShape[i] < 0) {
           auto dim = rewriter.create<DimOp>(loc, operands[0], outInDimMap[i]);
           allocOperands.push_back(dim);
@@ -1891,7 +1890,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     // Iteration information
     KrnlIterateOperandPack packInit(rewriter, originalLoopsInit,
         optimizedLoopsInit);
-    for (int i = 0; i < outRank; ++i) {
+    for (decltype(outRank) i = 0; i < outRank; ++i) {
       if (memRefOutShape[i] < 0) {
         packInit.pushConstantBound(0);
         packInit.pushOperandBound(
@@ -1951,7 +1950,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     Block &optimizationBlock = optimizedLoopsOp.region().front();
     // Iteration information
     KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-    for (int i = 0; i < inRank; ++i) {
+    for (decltype(inRank) i = 0; i < inRank; ++i) {
       if (memRefInShape[i] < 0) {
         pack.pushConstantBound(0);
         pack.pushOperandBound(
@@ -1980,7 +1979,7 @@ struct ONNXReductionOpLowering : public ConversionPattern {
       inLoopIVs.push_back(args[i]);
     }
     Value zeroIndex = nullptr;
-    for (int i = 0; i < outRank; ++i) {
+    for (decltype(inRank) i = 0; i < outRank; ++i) {
       if (outInDimMap.find(i) != outInDimMap.end()) {
         outLoopIVs.push_back(inLoopIVs[outInDimMap[i]]);
       } else {
