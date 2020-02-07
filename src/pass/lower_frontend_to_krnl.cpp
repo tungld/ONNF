@@ -130,9 +130,9 @@ static bool checkInsertDealloc(Operation *currentOp) {
   return insertDealloc;
 }
 
-// Create a mapping between an input type's dimensions and a result type's
-// dimensions, given that the result type is the result of a reduction op over
-// the input type.
+// Create a mapping from result type's dimensions to input type's dimensions,
+// given that the result type is the result of a reduction op over the input
+// type.
 std::map<int, int> getReductionMapping(MemRefType inputTy,
                                                ArrayRef<int> axes,
                                                bool keepdims) {
