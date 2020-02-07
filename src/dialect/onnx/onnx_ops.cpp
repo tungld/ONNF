@@ -32,10 +32,10 @@ RankedTensorType getReductionOutputType(RankedTensorType operandTy,
                                         APInt keepdims) {
   int64_t rank = operandTy.getRank();
 
-  SmallVector<int, 4> axes;
+  SmallVector<int64_t, 4> axes;
   if (axesAttrs != llvm::None) {
     for (auto axisAttr : axesAttrs.getValue()) {
-      int axis = axisAttr.cast<IntegerAttr>().getInt();
+      int64_t axis = axisAttr.cast<IntegerAttr>().getInt();
       axis = axis >= 0 ? axis : (rank + axis);
       assert(axis >= -rank && axis <= rank - 1);
       if (std::find(axes.begin(), axes.end(), axis) == axes.end())
