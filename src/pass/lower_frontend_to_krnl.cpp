@@ -146,22 +146,22 @@ unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
 
 // Get run-time dimension information for unknown dimensions used for
 // broadcasting.
-std::map<int, std::map<int, Value>>
+std::map<int64_t, std::map<int64_t, Value>>
 getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
                       MemRefType memRefType, ArrayRef<Value> operands) {
   auto memRefShape = memRefType.getShape();
   int64_t rank = memRefShape.size();
   // For unknown dimensions, we need to get dimension values at runtime in
   // order to do broadcasting.
-  std::map<int, std::map<int, Value>> DimInfo;
+  std::map<int64_t, std::map<int64_t, Value>> DimInfo;
   // For each result dimension, compute the number of sharing operands.
   // Sharing operands are operands sharing the same index (counting from the
   // rightmost to the leftmost) for a given dimension.
-  std::map<int, int> sharedDimCount;
-  for (int reversedIdx = 0; reversedIdx < rank; ++reversedIdx) {
-    int dimIdx = rank - 1 - reversedIdx;
+  std::map<int64_t, int64_t> sharedDimCount;
+  for (int64_t reversedIdx = 0; reversedIdx < rank; ++reversedIdx) {
+    int64_t dimIdx = rank - 1 - reversedIdx;
     sharedDimCount[dimIdx] = 0;
-    for (int i = 0; i < operands.size(); ++i) {
+    for (int64_t i = 0; i < operands.size(); ++i) {
       auto shape = operands[i].getType().cast<MemRefType>().getShape();
       if (reversedIdx <= shape.size() - 1)
         sharedDimCount[dimIdx]++;
@@ -172,11 +172,11 @@ getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
   // Otherwise, non-broadcasted dimension.
   // We only care about unknown dimensions whose number of sharing operands is
   // more than one, since they are potentially broadcasted dimensions.
-  for (int i = 0; i < operands.size(); ++i) {
-    std::map<int, Value> broadcastedDims;
+  for (int64_t i = 0; i < operands.size(); ++i) {
+    std::map<int64_t, Value> broadcastedDims;
     auto shape = operands[i].getType().cast<MemRefType>().getShape();
-    int size = shape.size();
-    for (int j = 0; j < shape.size(); ++j) {
+    int64_t size = shape.size();
+    for (int64_t j = 0; j < shape.size(); ++j) {
       if (shape[j] < 0 and sharedDimCount[rank - size + j] > 1) {
         auto dim = rewriter.create<DimOp>(loc, operands[i], j).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
@@ -195,7 +195,7 @@ getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
 std::vector<Value>
 getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
                           ArrayRef<Value> loopIVs, Value operand,
-                          std::map<int, Value> broadcastedDims) {
+                          std::map<int64_t, Value> broadcastedDims) {
   // `operand` must has a ranked type. This should have been checked by the
   // shape inference pass.
   auto operandShape = operand.getType().cast<MemRefType>().getShape();
@@ -231,7 +231,8 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
 KrnlIterateOperandPack createIterateOperandPack(
     Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
     KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
-    Value operand, ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
+    Value operand, ArrayRef<int64_t> loopsAxes = {},
+    ArrayRef<int64_t> axes = {}) {
   // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
   // supported.
   //
@@ -246,32 +247,33 @@ KrnlIterateOperandPack createIterateOperandPack(
   auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
 
   // Number of induction variables.
-  int numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
+  int64_t numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
 
   // Create a sorted vector of loops axes.
-  SmallVector<int, 4> sortedLoopsAxes;
+  SmallVector<int64_t, 4> sortedLoopsAxes;
   if (loopsAxes.empty()) {
-    for (int i = 0; i < numIVs; ++i) {
+    for (int64_t i = 0; i < numIVs; ++i) {
       sortedLoopsAxes.emplace_back(i);
     }
   } else {
-    for (int i = 0; i < numIVs; ++i) {
-      int axis = (loopsAxes[i] >= 0) ? loopsAxes[i]
-                                     : (loopsOpResult.size() + loopsAxes[i]);
+    for (int64_t i = 0; i < numIVs; ++i) {
+      int64_t axis = (loopsAxes[i] >= 0)
+                         ? loopsAxes[i]
+                         : (loopsOpResult.size() + loopsAxes[i]);
       sortedLoopsAxes.emplace_back(axis);
     }
     std::sort(sortedLoopsAxes.begin(), sortedLoopsAxes.end());
   }
 
   // Create a sorted vector of axes.
-  SmallVector<int, 4> sortedAxes;
+  SmallVector<int64_t, 4> sortedAxes;
   if (axes.empty()) {
-    for (int i = 0; i < numIVs; ++i) {
+    for (int64_t i = 0; i < numIVs; ++i) {
       sortedAxes.emplace_back(i);
     }
   } else {
-    for (int i = 0; i < numIVs; ++i) {
-      int axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
+    for (int64_t i = 0; i < numIVs; ++i) {
+      int64_t axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
       sortedAxes.emplace_back(axis);
     }
     std::sort(sortedAxes.begin(), sortedAxes.end());
@@ -282,14 +284,14 @@ KrnlIterateOperandPack createIterateOperandPack(
   std::vector<Value> originalLoops, optimizedLoops;
   originalLoops.reserve(numIVs);
   optimizedLoops.reserve(numIVs);
-  for (int i : sortedLoopsAxes) {
+  for (auto i : sortedLoopsAxes) {
     originalLoops.push_back(loopsOpResult[i]);
     optimizedLoops.push_back(optimizedLoopsOpResult[i]);
   }
 
   // Create an operand pack.
   KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-  for (int i : sortedAxes) {
+  for (auto i : sortedAxes) {
     if (memRefShape[i] < 0) {
       pack.pushConstantBound(0);
       pack.pushOperandBound(
@@ -307,7 +309,7 @@ KrnlIterateOperandPack createIterateOperandPack(
 std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
 insertKrnlOps(Location loc, PatternRewriter &rewriter,
               ArrayRef<int64_t> memRefShape, Value operand,
-              ArrayRef<int> axes = {}, bool includeIterateOp = true) {
+              ArrayRef<int64_t> axes = {}, bool includeIterateOp = true) {
   // If a dimension is unknown, get its value of a corresponding given operand.
   //
   // If `axes` is given, only iterate along those axes of the memRefShape. By
@@ -317,7 +319,7 @@ insertKrnlOps(Location loc, PatternRewriter &rewriter,
   // There is no optimization in the KrnlOptimizeLoopsOp.
 
   // Number of induction variables.
-  int numIVs = axes.empty() ? memRefShape.size() : axes.size();
+  int64_t numIVs = axes.empty() ? memRefShape.size() : axes.size();
 
   // Define loops.
   auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
@@ -326,8 +328,8 @@ insertKrnlOps(Location loc, PatternRewriter &rewriter,
   // Create a KrnlIterateOp
   KrnlIterateOp iterateOp;
   if (includeIterateOp) {
-    SmallVector<int, 4> loopsAxes;
-    for (int i = 0; i < axes.size(); ++i)
+    SmallVector<int64_t, 4> loopsAxes;
+    for (int64_t i = 0; i < axes.size(); ++i)
       loopsAxes.emplace_back(i);
     iterateOp = rewriter.create<KrnlIterateOp>(
         loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
@@ -1015,7 +1017,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
 
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
-    std::map<int, std::map<int, Value>> broadcastedDimInfo =
+    std::map<int64_t, std::map<int64_t, Value>> broadcastedDimInfo =
         getBroadcastedDimInfo(loc, rewriter, memRefType, operands);
 
     auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
@@ -1409,7 +1411,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         // (s1 x s2 x... x sK x M x K) MATMUL (K x N)
         // =>
         // (s1 x s2 x... x sK x M x N)
-        for (int i = 0; i < memRefShape.size() - 2; ++i) {
+        for (int64_t i = 0; i < memRefShape.size() - 2; ++i) {
           if (memRefShape[i] < 0) {
             if ((AShape.size() == 2) && (BShape.size() > 2))
               allocOperands.emplace_back(rewriter.create<DimOp>(loc, B, i));
@@ -1430,7 +1432,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         // K MATMUL (s1 x s2 x... x sK x K x N)
         // =>
         // (s1 x s2 x... x sK x N)
-        for (int i = 0; i < memRefShape.size() - 1; ++i) {
+        for (int64_t i = 0; i < memRefShape.size() - 1; ++i) {
           if (memRefShape[i] < 0) {
             auto dim = rewriter.create<DimOp>(loc, B, i);
             allocOperands.emplace_back(dim);
@@ -1445,7 +1447,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         // (s1 x s2 x... x sK x M x K) MATMUL K
         // =>
         // (s1 x s2 x... x sK x M)
-        for (int i = 0; i < memRefShape.size() - 1; ++i) {
+        for (int64_t i = 0; i < memRefShape.size() - 1; ++i) {
           if (memRefShape[i] < 0) {
             auto dim = rewriter.create<DimOp>(loc, A, i);
             allocOperands.emplace_back(dim);
@@ -1485,10 +1487,10 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       // Outer KrnlIterateOp
       SmallVector<Value, 4> loopOuterIVs;
       if (AShape.size() > 2 || BShape.size() > 2) {
-        SmallVector<int, 4> outerAxes;
+        SmallVector<int64_t, 4> outerAxes;
         int matmulResultDims =
             ((AShape.size() == 1 || BShape.size() == 1)) ? 1 : 2;
-        for (int i = 0; i < memRefShape.size() - matmulResultDims; ++i)
+        for (int64_t i = 0; i < memRefShape.size() - matmulResultDims; ++i)
           outerAxes.emplace_back(i);
 
         auto outerPack =
@@ -1715,13 +1717,13 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     std::vector<Value> outerLoops, optimizedOuterLoops;
     outerLoops.reserve(2);
     optimizedOuterLoops.reserve(2);
-    for (int i = 0; i < 2; ++i) {
+    for (int64_t i = 0; i < 2; ++i) {
       outerLoops.push_back(originalLoops[i]);
       optimizedOuterLoops.push_back(optimizedLoops[i]);
     }
     KrnlIterateOperandPack outerPack(rewriter, outerLoops, optimizedOuterLoops);
     // Induction variables for the outer loops
-    for (int i = 0; i < 2; ++i) {
+    for (int64_t i = 0; i < 2; ++i) {
       if (memRefShape[i] < 0) {
         outerPack.pushConstantBound(0);
         outerPack.pushOperandBound(
@@ -1759,9 +1761,9 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // broadcasting.
     // GemmOp supports unidirectional broadcasting from C to A*B.
     // Hence, it must be enough to get broadcasting information for C only.
-    std::map<int, Value> broadcastedDimInfo;
+    std::map<int64_t, Value> broadcastedDimInfo;
     auto shape = C.getType().cast<MemRefType>().getShape();
-    for (int i = 0; i < shape.size(); ++i) {
+    for (int64_t i = 0; i < shape.size(); ++i) {
       if (shape[i] < 0) {
         auto dim = rewriter.create<DimOp>(loc, C, i).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
