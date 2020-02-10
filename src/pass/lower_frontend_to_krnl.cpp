@@ -299,126 +299,6 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
-// Create an iterate operand pack for KrnlIterateOp
-KrnlIterateOperandPack createIterateOperandPack(
-    Location loc, PatternRewriter &rewriter, KrnlDefineLoopsOp loopsOp,
-    KrnlOptimizeLoopsOp optimizedLoopsOp, ArrayRef<int64_t> memRefShape,
-    Value operand, ArrayRef<int64_t> loopsAxes = {},
-    ArrayRef<int64_t> axes = {}) {
-  // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
-  // supported.
-  //
-  // If `loopsAxes` is given, only iterate along those axes of the loopsOp's
-  // result. By default, iterating along all axes.
-  //
-  // If `axes` is given, only iterate along those axes of `memRefShape` and
-  // `operand`. By default, iterating along all axes.
-  //
-
-  auto loopsOpResult = loopsOp.getResults();
-  auto optimizedLoopsOpResult = optimizedLoopsOp.getResults();
-
-  // Number of induction variables.
-  int64_t numIVs = loopsAxes.empty() ? loopsOpResult.size() : loopsAxes.size();
-
-  // Create a sorted vector of loops axes.
-  SmallVector<int64_t, 4> sortedLoopsAxes;
-  if (loopsAxes.empty()) {
-    for (int64_t i = 0; i < numIVs; ++i) {
-      sortedLoopsAxes.emplace_back(i);
-    }
-  } else {
-    for (int64_t i = 0; i < numIVs; ++i) {
-      int64_t axis = (loopsAxes[i] >= 0)
-                         ? loopsAxes[i]
-                         : (loopsOpResult.size() + loopsAxes[i]);
-      sortedLoopsAxes.emplace_back(axis);
-    }
-    std::sort(sortedLoopsAxes.begin(), sortedLoopsAxes.end());
-  }
-
-  // Create a sorted vector of axes.
-  SmallVector<int64_t, 4> sortedAxes;
-  if (axes.empty()) {
-    for (int64_t i = 0; i < numIVs; ++i) {
-      sortedAxes.emplace_back(i);
-    }
-  } else {
-    for (int64_t i = 0; i < numIVs; ++i) {
-      int64_t axis = (axes[i] >= 0) ? axes[i] : (memRefShape.size() + axes[i]);
-      sortedAxes.emplace_back(axis);
-    }
-    std::sort(sortedAxes.begin(), sortedAxes.end());
-  }
-  assert((sortedAxes.size() == sortedLoopsAxes.size()) && "Invalid Arguments");
-
-  // Create vectors of induction variables.
-  std::vector<Value> originalLoops, optimizedLoops;
-  originalLoops.reserve(numIVs);
-  optimizedLoops.reserve(numIVs);
-  for (auto i : sortedLoopsAxes) {
-    originalLoops.push_back(loopsOpResult[i]);
-    optimizedLoops.push_back(optimizedLoopsOpResult[i]);
-  }
-
-  // Create an operand pack.
-  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-  for (auto i : sortedAxes) {
-    if (memRefShape[i] < 0) {
-      pack.pushConstantBound(0);
-      pack.pushOperandBound(
-          rewriter.create<DimOp>(loc, operand, i).getResult());
-    } else {
-      pack.pushConstantBound(0);
-      pack.pushConstantBound(memRefShape[i]);
-    }
-  }
-
-  return pack;
-}
-
-// Insert a block of KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp.
-std::tuple<KrnlDefineLoopsOp, KrnlOptimizeLoopsOp, KrnlIterateOp>
-insertKrnlOps(Location loc, PatternRewriter &rewriter,
-              ArrayRef<int64_t> memRefShape, Value operand,
-              ArrayRef<int64_t> axes = {}, bool includeIterateOp = true) {
-  // If a dimension is unknown, get its value of a corresponding given operand.
-  //
-  // If `axes` is given, only iterate along those axes of the memRefShape. By
-  // default, iterating along all axes. `axes` is a list of non-duplicated ints.
-  // Negative axis is supported.
-  //
-  // There is no optimization in the KrnlOptimizeLoopsOp.
-
-  // Number of induction variables.
-  int64_t numIVs = axes.empty() ? memRefShape.size() : axes.size();
-
-  // Define loops.
-  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numIVs);
-  // Define loop optimization.
-  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numIVs);
-  // Create a KrnlIterateOp
-  KrnlIterateOp iterateOp;
-  if (includeIterateOp) {
-    SmallVector<int64_t, 4> loopsAxes;
-    for (int64_t i = 0; i < axes.size(); ++i)
-      loopsAxes.emplace_back(i);
-    iterateOp = rewriter.create<KrnlIterateOp>(
-        loc, createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                      memRefShape, operand, loopsAxes, axes));
-  }
-
-  // No optimization
-  rewriter.setInsertionPointToEnd(&optimizedLoopsOp.region().front());
-  rewriter.create<KrnlReturnLoopsOp>(loc, loopsOp.getResults());
-  if (includeIterateOp)
-    rewriter.setInsertionPointAfter(iterateOp);
-  else
-    rewriter.setInsertionPointAfter(optimizedLoopsOp);
-
-  return std::make_tuple(loopsOp, optimizedLoopsOp, iterateOp);
-}
-
 namespace {
 
 template <typename ElementwiseNaryOp>
@@ -1738,21 +1618,23 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
     // Computation of BatchNormalization is done as if scale, bias, mean, and
     // variance are reshaped to Cx1x1x...x1.
 
-    auto krnlOps =
-        insertKrnlOps(loc, rewriter, memRefType.getShape(), operand, {},
-                      /*includeIterateOp*/ false);
-    auto loopsOp = std::get<0>(krnlOps);
-    auto optimizedLoopsOp = std::get<1>(krnlOps);
+    // rank
+    int64_t rank = memRefType.getRank();
+
+    std::vector<Value> originalLoops;
+    std::vector<Value> optimizedLoops;
+    Block *optimizationBlock =
+        defineLoops(rewriter, loc, originalLoops, optimizedLoops, rank);
 
     // Create a KrnlIterateOp along C dimension.
     // This will be the outer-most loop in order to re-use scale, bias,
     // mean and variance.
 
     SmallVector<Value, 1> loopCIVs;
-    if (memRefType.getShape().size() > 1) {
-      auto cPack =
-          createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                   memRefType.getShape(), operand, {1}, {1});
+    if (rank > 1) {
+      KrnlIterateOperandPack cPack(rewriter, originalLoops[1],
+                                   optimizedLoops[1]);
+      addDimensionToPack(rewriter, loc, cPack, operand, 1);
       auto cIterateOp = rewriter.create<KrnlIterateOp>(loc, cPack);
       Block &cIterationBlock = cIterateOp.bodyRegion().front();
       rewriter.setInsertionPointToStart(&cIterationBlock);
@@ -1770,12 +1652,23 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
     // Create a KrnlIterateOp along the other dimensions.
     SmallVector<int64_t, 4> axes;
     axes.emplace_back(0);
-    for (int64_t i = 2; i < memRefType.getShape().size(); ++i)
+    for (int64_t i = 2; i < rank; ++i)
       axes.emplace_back(i);
-    auto pack =
-        createIterateOperandPack(loc, rewriter, loopsOp, optimizedLoopsOp,
-                                 memRefType.getShape(), operand, axes, axes);
+    std::vector<Value> packLoops, packOptimizedLoops;
+    for (int i = 0; i < axes.size(); ++i) {
+      packLoops.emplace_back(originalLoops[axes[i]]);
+      packOptimizedLoops.emplace_back(optimizedLoops[axes[i]]);
+    }
+    KrnlIterateOperandPack pack(rewriter, packLoops, packOptimizedLoops);
+    for (int i = 0; i < axes.size(); ++i) {
+      addDimensionToPack(rewriter, loc, pack, operand, axes[i]);
+    }
     auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+
+    // No optimization
+    rewriter.setInsertionPointToEnd(optimizationBlock);
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+
     Block &iterationBlock = iterateOp.bodyRegion().front();
     rewriter.setInsertionPointToStart(&iterationBlock);
 
