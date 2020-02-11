@@ -130,6 +130,37 @@ static bool checkInsertDealloc(Operation *currentOp) {
   return insertDealloc;
 }
 
+// Create a mapping from result type's dimensions to input type's dimensions,
+// given that the result type is the result of a reduction op over the input
+// type.
+std::map<int64_t, int64_t>
+getReductionMapping(MemRefType inputTy, ArrayRef<int64_t> axes, bool keepdims) {
+  std::map<int64_t, int64_t> OutInDimMap;
+  int64_t rank = inputTy.getRank();
+
+  // Mark reduction axes.
+  std::vector<bool> isReductionAxis;
+  for (decltype(rank) i = 0; i < rank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end())
+      isReductionAxis.push_back(true);
+    else
+      isReductionAxis.push_back(false);
+  }
+
+  for (decltype(rank) inIndex = 0, outIndex = 0; inIndex < rank; ++inIndex) {
+    // If it is a reduction axis, there is no relationship among dimensions.
+    if (isReductionAxis[inIndex]) {
+      if (keepdims)
+        outIndex++;
+    } else {
+      OutInDimMap.insert(std::make_pair(outIndex, inIndex));
+      outIndex++;
+    }
+  }
+
+  return OutInDimMap;
+}
+
 // Add bounds associated with the op operand to the KRNL iteration pack.
 // Dynamic dimenions are supported.
 static void addDimensionToPack(ConversionPatternRewriter &rewriter,
@@ -377,6 +408,18 @@ struct ScalarOp<ONNXLogOp> {
 };
 
 template <>
+struct ScalarOp<ONNXReduceProdOp> {
+  using FOp = MulFOp;
+  using IOp = MulIOp;
+};
+
+template <>
+struct ScalarOp<ONNXReduceSumOp> {
+  using FOp = AddFOp;
+  using IOp = AddIOp;
+};
+
+template <>
 struct ScalarOp<ONNXSqrtOp> {
   using FOp = KrnlSqrtOp;
   using IOp = KrnlSqrtOp; // not use
@@ -386,6 +429,53 @@ template <typename ElementwiseNaryOp>
 using ScalarFOp = typename ScalarOp<ElementwiseNaryOp>::FOp;
 template <typename ElementwiseNaryOp>
 using ScalarIOp = typename ScalarOp<ElementwiseNaryOp>::IOp;
+
+// Get the identity element of a operation.
+// Return NULL if the function does not have identity.
+template <typename DataType, typename Op>
+DataType getIdentityValue() {
+  return NULL;
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceMaxOp>(){
+  return (float)-std::numeric_limits<float>::infinity();
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceMaxOp>(){
+  return std::numeric_limits<int>::min();
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceMinOp>(){
+  return (float)std::numeric_limits<float>::infinity();
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceMinOp>(){
+  return std::numeric_limits<int>::max();
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceProdOp>(){
+  return (float)1.0;
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceProdOp>(){
+  return 1;
+}
+
+template <>
+float getIdentityValue<float, ONNXReduceSumOp>(){
+  return (float)0;
+}
+
+template <>
+int getIdentityValue<int, ONNXReduceSumOp>(){
+  return 0;
+}
 
 //===----------------------------------------------------------------------===//
 // Scalar unary ops for lowering to Krnl dialect.
@@ -788,6 +878,58 @@ Value mapToLowerScalarOp<ONNXMinOp>(Operation *op, ArrayRef<Type> result_types,
   return result;
 }
 
+//===----------------------------------------------------------------------===//
+// Scalar unary ops for lowering ONNXReduceMaxOp
+//===----------------------------------------------------------------------===//
+template <>
+Value mapToLowerScalarOp<ONNXReduceMaxOp>(Operation *op,
+                                          ArrayRef<Type> result_types,
+                                          ArrayRef<Value> operands,
+                                          ConversionPatternRewriter &rewriter) {
+  auto loc = op->getLoc();
+  Value lhs = operands[0];
+  Value rhs = operands[1];
+  Type element_type = lhs.getType();
+  if (element_type.isa<IntegerType>()) {
+    auto max = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
+    return result;
+  } else if (element_type.isa<FloatType>()) {
+    auto max = rewriter.create<CmpFOp>(loc, CmpFPredicate::OGT, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, max, lhs, rhs);
+    return result;
+  } else {
+    emitError(loc, "unsupported element type");
+    return nullptr;
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Scalar unary ops for lowering ONNXReduceMinOp
+//===----------------------------------------------------------------------===//
+template <>
+Value mapToLowerScalarOp<ONNXReduceMinOp>(Operation *op,
+                                          ArrayRef<Type> result_types,
+                                          ArrayRef<Value> operands,
+                                          ConversionPatternRewriter &rewriter) {
+  auto loc = op->getLoc();
+  Value lhs = operands[0];
+  Value rhs = operands[1];
+  Type element_type = lhs.getType();
+  if (element_type.isa<IntegerType>()) {
+    auto min = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
+    return result;
+  } else if (element_type.isa<FloatType>()) {
+    auto min = rewriter.create<CmpFOp>(loc, CmpFPredicate::OLT, lhs, rhs);
+    auto result = rewriter.create<SelectOp>(loc, min, lhs, rhs);
+    return result;
+  } else {
+    emitError(loc, "unsupported element type");
+    return nullptr;
+  }
+}
+
 // Element-wise unary ops lowering to Krnl dialect.
 //===----------------------------------------------------------------------===//
 template <typename ElementwiseUnaryOp>
@@ -1137,44 +1279,73 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     auto tensorType = (*op->result_type_begin()).cast<TensorType>();
+    auto inputShape = operands[0].getType().cast<MemRefType>().getShape();
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
     auto memRefType = convertTensorToMemRef(tensorType);
+    auto memRefShape = memRefType.getShape();
     Value alloc;
 
-    // Compute size in bytes.
+    // Compute size in bytes using the input tensor.
     Value tensorSize = rewriter.create<ConstantOp>(
         loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
                                      getMemRefEltSizeInBytes(memRefType)));
+    for (int i = 0; i < inputShape.size(); ++i) {
+      Value dimVal;
+      if (inputShape[i] < 0) {
+        Value dim = rewriter.create<DimOp>(loc, operands[0], i);
+        dimVal =
+            rewriter.create<IndexCastOp>(loc, dim, rewriter.getIntegerType(64));
+      } else {
+        dimVal = rewriter.create<ConstantOp>(
+            loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                         inputShape[i]));
+      }
+      tensorSize = rewriter.create<MulIOp>(loc, tensorSize, dimVal);
+    }
+
     bool insertDealloc = checkInsertDealloc(op);
     if (hasAllConstantDimensions(memRefType)) {
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
     } else {
-      auto memRefShape = memRefType.getShape();
-      auto inputShape = operands[0].getType().cast<MemRefType>().getShape();
-      SmallVector<Value, 4> allocOperands;
+      // If a dimension is zero, the actual dimension value is taken from the
+      // input tensor.
+      //
+      // If the shape array has a negative dimension (-1), we compute its actual
+      // dimension value from the other dimensions. But we don't have enough
+      // information about the other dimensions at this point. So, we need to
+      // scan the shape first to calculate reduction of all of the dimensions.
+      // If the reduction is negative, then the shape array contains a negative
+      // dimension. Otherwise, the reduction is the same as the one computed
+      // from the input tensor.
+      Value tensorSizeFromShape = rewriter.create<ConstantOp>(
+          loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                       getMemRefEltSizeInBytes(memRefType)));
+      SmallVector<Value, 4> DimInfo;
       for (int i = 0; i < memRefShape.size(); ++i) {
-        // The shape array can always be used to construct shape information of
-        // the result.
         Value index = rewriter.create<ConstantOp>(
             loc, rewriter.getIntegerAttr(rewriter.getIndexType(), i));
         // Load index from array of indices.
         Value loadedVal = rewriter.create<LoadOp>(loc, operands[1], index);
         // If a dimension is zero, the actual dimension value is taken from the
         // input tensor.
+        //
+        // If a dimension is negative, it is computed from the other dimensions.
+        // But we don't have enough information about the other dimensions at
+        // this point. So, we let it as it is (-1), and compute it later.
         if (i < inputShape.size()) {
           Value dimVal;
-          auto dimTy = loadedVal.getType().cast<IntegerType>();
+          auto loadedValType = loadedVal.getType().cast<IntegerType>();
           if (inputShape[i] < 0) {
             Value dim = rewriter.create<DimOp>(loc, operands[0], i);
-            dimVal = rewriter.create<IndexCastOp>(loc, dim, dimTy);
+            dimVal = rewriter.create<IndexCastOp>(loc, dim, loadedValType);
           } else {
             dimVal = rewriter.create<ConstantOp>(
-                loc, rewriter.getIntegerAttr(dimTy, inputShape[i]));
+                loc, rewriter.getIntegerAttr(loadedValType, inputShape[i]));
           }
           auto zero = rewriter.create<ConstantOp>(
-              loc, rewriter.getIntegerAttr(dimTy, 0));
+              loc, rewriter.getIntegerAttr(loadedValType, 0));
           auto isZero =
               rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, loadedVal, zero);
           loadedVal = rewriter.create<SelectOp>(loc, isZero, dimVal, loadedVal);
@@ -1185,9 +1356,36 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
         if (loadedVal.getType().cast<IntegerType>().getWidth() < 64)
           int64LoadedVal = rewriter.create<ZeroExtendIOp>(
               loc, loadedVal, rewriter.getIntegerType(64));
-        tensorSize = rewriter.create<MulIOp>(loc, tensorSize, int64LoadedVal);
+        tensorSizeFromShape =
+            rewriter.create<MulIOp>(loc, tensorSizeFromShape, int64LoadedVal);
+        // Store intermediate results to use later.
+        DimInfo.emplace_back(int64LoadedVal);
+      }
+      // Reverse tensorSizeFromShape since it is negative if the shape array has
+      // a negative dimension. This is safe since we only use it to compute the
+      // actual value for the negative dimension.
+      auto zero = rewriter.create<ConstantOp>(
+          loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64), 0));
+      tensorSizeFromShape =
+          rewriter.create<SubIOp>(loc, zero, tensorSizeFromShape);
+
+      // Obtain operands for AllocOp.
+      SmallVector<Value, 4> allocOperands;
+      auto negOne = rewriter.create<ConstantOp>(
+          loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64), -1));
+
+      for (int i = 0; i < memRefShape.size(); ++i) {
+        auto dimVal = DimInfo[i];
+        auto isNegOne =
+            rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dimVal, negOne);
+        // If dimension is negative, compute its value from the other
+        // dimensions.
+        auto actualDimVal =
+            rewriter.create<SignedDivIOp>(loc, tensorSize, tensorSizeFromShape);
+        auto loadedVal =
+            rewriter.create<SelectOp>(loc, isNegOne, actualDimVal, dimVal);
         allocOperands.push_back(rewriter.create<IndexCastOp>(
-              loc, loadedVal, rewriter.getIndexType()));
+            loc, loadedVal, rewriter.getIndexType()));
       }
       AllocOp allocateMemref =
           rewriter.create<AllocOp>(loc, memRefType, allocOperands);
@@ -1739,6 +1937,8 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
     //
     // The loop nest will look as follows:
     //
+    // strides = [s1, s2]
+    //
     // kernelsPerGroup = M / group;
     // for n = 0 .. N:
     //   for g = 0 .. group:
@@ -1751,8 +1951,13 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
     //             for k1 = 0 .. KH:
     //               for k2 = 0 .. KW:
     //                 R[n][kernel][r1][r2] =
-    //                   D[n][g * (C / group) + c][r1 + k1][r2 + k2] *
+    //                   D[n][g * (C / group) + c][s1 * r1 + k1][s2 * r2 + k2] *
     //                   K[kernel][c][k1][k2];
+    //
+    // Naming:
+    //   n, g, m: outer loop nest indices
+    //   r1, r2: spatial loop nest indices
+    //   c, k1, k2: inner loop nest indices
     //
     // TODO: handle padding.
     //
@@ -1900,7 +2105,7 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
         {
           // 4. Emit inner loop body
           // R[n][kernel][r1][r2] =
-          //   D[n][g * (C / group) + c][r1 + k1][r2 + k2] *
+          //   D[n][g * (C / group) + c][s1 * r1 + k1][s2 * r2 + k2] *
           //   K[kernel][c][k1][k2];
 
           // 4.1 Prepare indices for accesing the data tensor.
@@ -1914,12 +2119,24 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
                 rewriter.create<MulIOp>(loc, subchannels,
                     outerIterationBlock.getArguments()[1]));
           dataIndices.emplace_back(channelDepth);
-          // rX + kX
-          for (int i = 0; i < kernelShape.size() - 2; ++i)
+          // sX * rX + kX
+          auto stridesAttribute = convOp.stridesAttr();
+          // Read strides attribute
+          SmallVector<int, 4> strides;
+          if (stridesAttribute)
+            for (auto stride : stridesAttribute.getValue())
+              strides.emplace_back(stride.cast<IntegerAttr>().getInt());
+          for (int i = 0; i < kernelShape.size() - 2; ++i) {
+            Value spatialIndex = spatialIterationBlock.getArguments()[i];
+            // If strides are present then emit the correct access index.
+            if (stridesAttribute && strides[i] > 1)
+              spatialIndex = rewriter.create<MulIOp>(loc,
+                  rewriter.create<ConstantIndexOp>(loc, strides[i]),
+                  spatialIterationBlock.getArguments()[i]);
             dataIndices.emplace_back(
-                rewriter.create<AddIOp>(loc,
-                    spatialIterationBlock.getArguments()[i],
+                rewriter.create<AddIOp>(loc, spatialIndex,
                     innerIterationBlock.getArguments()[i+1]));
+          }
 
           // 4.2 Prepare indices for accessing the kernel tensor.
           SmallVector<Value, 4> kernelIndices;
@@ -1948,6 +2165,193 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
     }
     rewriter.replaceOp(op, alloc);
 
+    return matchSuccess();
+  }
+};
+
+//===----------------------------------------------------------------------===//
+// Reduction ops lowering to Krnl dialect.
+//===----------------------------------------------------------------------===//
+template <typename ONNXReductionOp>
+struct ONNXReductionOpLowering : public ConversionPattern {
+  ONNXReductionOpLowering(MLIRContext *ctx)
+      : ConversionPattern(ONNXReductionOp::getOperationName(), 1, ctx) {}
+
+  PatternMatchResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    /*
+     * Condition: reduction function must be associative and commutative.
+     *
+     * Example 1 (here, reduction function is `+`):
+     * Induction variables: (i0, i1, i2)
+     * axes = [0, 2]
+     * keepdims = true
+     * krnl.iterate() with (i0, i1, i2) {
+     *   Y(0, i1, 0) += X(i0, i1, i2)
+     * }
+     *
+     * Example 2 (here, reduction function is `+`):
+     * Induction variables: (i0, i1, i2)
+     * axes = [0, 2]
+     * keepdims = false
+     * krnl.iterate() with (i0, i1, i2) {
+     *   Y(i1) += X(i0, i1, i2)
+     * }
+     *
+    */
+    auto loc = op->getLoc();
+    auto memRefInType = operands[0].getType().cast<MemRefType>();
+    auto memRefInShape = memRefInType.getShape();
+    auto tensorOutType = (*op->result_type_begin()).cast<TensorType>();
+    int64_t inRank = memRefInType.getRank();
+    int64_t outRank = tensorOutType.getRank();
+
+    // Get attributes
+    ArrayAttr axisAttrs = llvm::dyn_cast<ONNXReductionOp>(op).axesAttr();
+    std::vector<int64_t> axes;
+    if (axisAttrs) {
+      for (auto axisAttr : axisAttrs.getValue()) {
+        int64_t axis = axisAttr.cast<IntegerAttr>().getInt();
+        axis = axis >= 0 ? axis : (inRank + axis);
+        assert(axis >= -inRank && axis <= inRank - 1);
+        if (std::find(axes.begin(), axes.end(), axis) == axes.end())
+          axes.push_back(axis);
+      }
+    } else {
+      for (decltype(inRank) i = 0; i < inRank; ++i) {
+        axes.push_back(i);
+      }
+    }
+    // KeepDims
+    auto keepdims =
+        llvm::dyn_cast<ONNXReductionOp>(op).keepdims();
+    bool isKeepdims = (keepdims == 1) ? true : false;
+
+    // Get type information
+    auto memRefOutType = convertTensorToMemRef(tensorOutType);
+    auto memRefOutShape = memRefOutType.getShape();
+    auto elementOutType = memRefOutType.getElementType();
+    std::map<int64_t, int64_t> outInDimMap =
+        getReductionMapping(memRefInType, axes, isKeepdims);
+
+    // Insert an allocation and deallocation for the result of this operation.
+    Value alloc;
+    bool insertDealloc = checkInsertDealloc(op);
+    if (hasAllConstantDimensions(memRefOutType)) {
+      alloc = insertAllocAndDealloc(memRefOutType, loc, rewriter, insertDealloc);
+    } else {
+      SmallVector<Value, 2> allocOperands;
+      for (decltype(outRank) i = 0; i < outRank; ++i) {
+        if (memRefOutShape[i] < 0) {
+          auto dim = rewriter.create<DimOp>(loc, operands[0], outInDimMap[i]);
+          allocOperands.push_back(dim);
+        }
+      }
+      alloc = rewriter.create<AllocOp>(loc, memRefOutType, allocOperands);
+      if (insertDealloc) {
+        auto *parentBlock = alloc.getDefiningOp()->getBlock();
+        auto dealloc = rewriter.create<DeallocOp>(loc, alloc);
+        dealloc.getOperation()->moveBefore(&parentBlock->back());
+      }
+    }
+
+    // There are two Krnl loops:
+    // - One to initialize the result memref, and
+    // - One to do reduction
+
+    // Define loops to initialize the result.
+    std::vector<Value> originalLoopsInit;
+    std::vector<Value> optimizedLoopsInit;
+    Block *optimizationBlockInit = defineLoops(rewriter, loc, originalLoopsInit,
+            optimizedLoopsInit, outRank);
+
+    // Iteration information
+    KrnlIterateOperandPack packInit(rewriter, originalLoopsInit,
+        optimizedLoopsInit);
+    for (decltype(outRank) i = 0; i < outRank; ++i) {
+      addDimensionToPack(rewriter, loc, packInit, alloc, i);
+    }
+    auto iterateOpInit = rewriter.create<KrnlIterateOp>(loc, packInit);
+    Block &iterationBlockInit = iterateOpInit.bodyRegion().front();
+
+    // Perform the insertions into the body of the initialization loop.
+    // No optimization
+    rewriter.setInsertionPointToEnd(optimizationBlockInit);
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoopsInit);
+
+    // Insert instructions inside the KernelIterateOp body.
+    rewriter.setInsertionPointToStart(&iterationBlockInit);
+
+    // Handle the operation:
+    SmallVector<Value, 4> loopIVs;
+    for (auto arg : iterationBlockInit.getArguments()) {
+      loopIVs.push_back(arg);
+    }
+
+    Value identity;
+    if (elementOutType.isa<FloatType>()) {
+      identity = rewriter.create<ConstantOp>(
+          loc, FloatAttr::get(elementOutType,
+                              getIdentityValue<float, ONNXReductionOp>()));
+    } else if (elementOutType.isa<IntegerType>()) {
+      identity = rewriter.create<ConstantOp>(
+          loc, IntegerAttr::get(elementOutType,
+                                getIdentityValue<int, ONNXReductionOp>()));
+    } else {
+      emitError(loc, "unsupported element type");
+    }
+    rewriter.create<StoreOp>(loc, identity, alloc, loopIVs);
+
+    // Define an Krnl loop to do reduction.
+    rewriter.setInsertionPointAfter(iterateOpInit);
+    std::vector<Value> originalLoops, optimizedLoops;
+    Block *optimizationBlock = defineLoops(rewriter, loc, originalLoops,
+            optimizedLoops, inRank);
+    // Iteration information
+    KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+    for (decltype(inRank) i = 0; i < inRank; ++i) {
+      addDimensionToPack(rewriter, loc, pack, operands[0], i);
+    }
+    auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+    Block &iterationBlock = iterateOp.bodyRegion().front();
+
+    // Perform the insertions into the body of the reduction loop.
+    // No optimization
+    rewriter.setInsertionPointToEnd(optimizationBlock);
+    rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
+
+    // Insert instructions inside the KernelIterateOp body.
+    rewriter.setInsertionPointToStart(&iterationBlock);
+
+    // Handle the operation:
+    SmallVector<Value, 4> inLoopIVs, outLoopIVs;
+    auto args = iterationBlock.getArguments();
+    for (int i = 0; i < args.size(); ++i) {
+      inLoopIVs.push_back(args[i]);
+    }
+    Value zeroIndex = nullptr;
+    for (decltype(inRank) i = 0; i < outRank; ++i) {
+      if (outInDimMap.find(i) != outInDimMap.end()) {
+        outLoopIVs.push_back(inLoopIVs[outInDimMap[i]]);
+      } else {
+        if (zeroIndex) {
+          outLoopIVs.push_back(zeroIndex);
+        } else {
+          zeroIndex = rewriter.create<ConstantIndexOp>(loc, 0);
+          outLoopIVs.push_back(zeroIndex);
+        }
+      }
+    }
+
+    Value next, accumulated;
+    next = rewriter.create<LoadOp>(loc, operands[0], inLoopIVs);
+    accumulated = rewriter.create<LoadOp>(loc, alloc, outLoopIVs);
+    accumulated = mapToLowerScalarOp<ONNXReductionOp>(
+        op, memRefOutType.getElementType(), {accumulated, next}, rewriter);
+    rewriter.create<StoreOp>(loc, accumulated, alloc, outLoopIVs);
+
+    rewriter.replaceOp(op, alloc);
     return matchSuccess();
   }
 };
@@ -2081,6 +2485,10 @@ void FrontendToKrnlLoweringPass::runOnModule() {
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMaxOp>,
                   ONNXElementwiseVariadicOpLowering<mlir::ONNXMinOp>,
                   ONNXReshapeOpLowering, ONNXEntryPointLowering,
+                  ONNXReductionOpLowering<mlir::ONNXReduceMaxOp>,
+                  ONNXReductionOpLowering<mlir::ONNXReduceMinOp>,
+                  ONNXReductionOpLowering<mlir::ONNXReduceProdOp>,
+                  ONNXReductionOpLowering<mlir::ONNXReduceSumOp>,
                   ONNXSoftmaxOpLowering, ONNXGemmOpLowering,
                   ONNXUnsqueezeOpLowering, ONNXTransposeOpLowering,
                   ONNXIdentityOpLowering, ONNXConvNoBiasOpLowering,

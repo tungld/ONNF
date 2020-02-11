@@ -134,6 +134,46 @@ test_to_enable = [
     # Relu Op:
     "test_relu_cpu",
 
+    # ReduceMax Op:
+    "test_reduce_max_default_axes_keepdim_example_cpu",
+    "test_reduce_max_default_axes_keepdims_random_cpu",
+    "test_reduce_max_do_not_keepdims_example_cpu",
+    "test_reduce_max_do_not_keepdims_random_cpu",
+    "test_reduce_max_keepdims_example_cpu",
+    "test_reduce_max_keepdims_random_cpu",
+    "test_reduce_max_negative_axes_keepdims_example_cpu",
+    "test_reduce_max_negative_axes_keepdims_random_cpu",
+
+    # ReduceMin Op:
+    "test_reduce_min_default_axes_keepdims_example_cpu",
+    "test_reduce_min_default_axes_keepdims_random_cpu",
+    "test_reduce_min_do_not_keepdims_example_cpu",
+    "test_reduce_min_do_not_keepdims_random_cpu",
+    "test_reduce_min_keepdims_example_cpu",
+    "test_reduce_min_keepdims_random_cpu",
+    "test_reduce_min_negative_axes_keepdims_example_cpu",
+    "test_reduce_min_negative_axes_keepdims_random_cpu",
+
+    # ReduceProd Op:
+    "test_reduce_prod_default_axes_keepdims_example_cpu",
+    "test_reduce_prod_default_axes_keepdims_random_cpu",
+    "test_reduce_prod_do_not_keepdims_example_cpu",
+    "test_reduce_prod_do_not_keepdims_random_cpu",
+    "test_reduce_prod_keepdims_example_cpu",
+    "test_reduce_prod_keepdims_random_cpu",
+    "test_reduce_prod_negative_axes_keepdims_example_cpu",
+    "test_reduce_prod_negative_axes_keepdims_random_cpu",
+
+    # ReduceSum Op:
+    "test_reduce_sum_default_axes_keepdims_example_cpu",
+    "test_reduce_sum_default_axes_keepdims_random_cpu",
+    "test_reduce_sum_do_not_keepdims_example_cpu",
+    "test_reduce_sum_do_not_keepdims_random_cpu",
+    "test_reduce_sum_keepdims_example_cpu",
+    "test_reduce_sum_keepdims_random_cpu",
+    "test_reduce_sum_negative_axes_keepdims_example_cpu",
+    "test_reduce_sum_negative_axes_keepdims_random_cpu",
+
     # Selu Op:
     "test_selu_cpu",
     "test_selu_default_cpu",
@@ -184,13 +224,13 @@ test_to_enable = [
 
     # ReshapeOp:
     "test_reshape_extended_dims_cpu",
-    #"test_reshape_negative_dim_cpu", <- handle nagative dim
-    #"test_reshape_negative_extended_dims_cpu", <- handle nagative dim
+    "test_reshape_negative_dim_cpu",
+    "test_reshape_negative_extended_dims_cpu",
     "test_reshape_one_dim_cpu",
     "test_reshape_reduced_dims_cpu",
     "test_reshape_reordered_all_dims_cpu",
     "test_reshape_reordered_last_dims_cpu",
-    #"test_reshape_zero_and_negative_dim_cpu", <- handle nagative dim
+    "test_reshape_zero_and_negative_dim_cpu",
     "test_reshape_zero_dim_cpu",
 
     # Transpose
@@ -204,6 +244,7 @@ test_to_enable = [
 
     # Conv
     "test_basic_conv_without_padding_cpu",
+    "test_conv_with_strides_no_padding_cpu",
 
     # Sign Op:
     "test_sign_cpu",
