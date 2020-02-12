@@ -25,6 +25,54 @@ using namespace mlir;
 using namespace mlir::OpTrait::util;
 
 //===----------------------------------------------------------------------===//
+// Get reduction type
+//===----------------------------------------------------------------------===//
+RankedTensorType getReductionOutputType(RankedTensorType operandTy,
+                                        Optional<ArrayAttr> axesAttrs,
+                                        APInt keepdims) {
+  int64_t rank = operandTy.getRank();
+
+  SmallVector<int64_t, 4> axes;
+  if (axesAttrs != llvm::None) {
+    for (auto axisAttr : axesAttrs.getValue()) {
+      int64_t axis = axisAttr.cast<IntegerAttr>().getInt();
+      axis = axis >= 0 ? axis : (rank + axis);
+      assert(axis >= -rank && axis <= rank - 1);
+      if (std::find(axes.begin(), axes.end(), axis) == axes.end())
+        axes.emplace_back(axis);
+    }
+  } else {
+    for (decltype(rank) i = 0; i < rank; ++i) {
+      axes.emplace_back(i);
+    }
+  }
+
+  // Mark reduction axes.
+  SmallVector<bool, 4> isReductionAxis;
+  for (decltype(rank) i = 0; i < rank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end())
+      isReductionAxis.emplace_back(true);
+    else
+      isReductionAxis.emplace_back(false);
+  }
+
+  // KeepDims
+  bool isKeepdims = (keepdims == 1) ? true : false;
+
+  SmallVector<int64_t, 4> dims;
+  for (decltype(rank) i = 0; i < rank; ++i) {
+    if (isReductionAxis[i]) {
+      if (isKeepdims)
+        dims.emplace_back(1); // reduction dimension
+    } else {
+      dims.emplace_back(operandTy.getShape()[i]);
+    }
+  }
+
+  return RankedTensorType::get(dims, operandTy.getElementType());
+}
+
+//===----------------------------------------------------------------------===//
 // ONNXOpsDialect
 //===----------------------------------------------------------------------===//
 
@@ -179,6 +227,22 @@ void ONNXSoftplusOp::inferShapes() {
 /// Infer the output shape of the ONNXSoftsignOp. This method is required by
 /// the shape inference interface.
 void ONNXSoftsignOp::inferShapes() {
+  getResult().setType(getOperand().getType());
+}
+
+//===----------------------------------------------------------------------===//
+// Sqrt
+/// Infer the output shape of the ONNXSqrtOp. This method is required by
+/// the shape inference interface.
+void ONNXSqrtOp::inferShapes() {
+  getResult().setType(getOperand().getType());
+}
+
+//===----------------------------------------------------------------------===//
+// Sign
+/// Infer the output shape of the ONNXSignOp. This method is required by
+/// the shape inference interface.
+void ONNXSignOp::inferShapes() {
   getResult().setType(getOperand().getType());
 }
 
@@ -363,6 +427,42 @@ void ONNXMatMulOp::inferShapes() {
         lhsShape[0] != rhsShape[0])
       emitError("Attempt to multiply incompatible matrices.");
     dims.emplace_back(1);
+  } else if (lhsShape.size() == 1 && rhsShape.size() >= 2) {
+    // If the first argument is 1-D, it is promoted to a matrix by prepending a
+    // 1 to its dimensions. After matrix multiplication the prepended 1 is
+    // removed.
+    //
+    // N MATMUL (s1 x s2 x... x sK x N x P)
+    // =>
+    // (s1 x s2 x... x sK x P)
+
+    // Check legality of matrix multiplication.
+    unsigned rhsRank = rhsShape.size();
+    if (lhsShape[0] != -1 && rhsShape[rhsRank - 2] != -1 &&
+        lhsShape[0] != rhsShape[rhsRank - 2])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    for (int i = 0; i < rhsRank - 2; ++i)
+      dims.emplace_back(rhsShape[i]);
+    dims.emplace_back(rhsShape[rhsRank - 1]);
+  } else if (lhsShape.size() >= 2 && rhsShape.size() == 1) {
+    // If the second argument is 1-D, it is promoted to a matrix by appending a
+    // 1 to its dimensions. After matrix multiplication the appended 1 is
+    // removed.
+    //
+    // (s1 x s2 x... x sK x M x N) MATMUL N
+    // =>
+    // (s1 x s2 x... x sK x M)
+
+    // Check legality of matrix multiplication.
+    unsigned lhsRank = lhsShape.size();
+    if (lhsShape[lhsRank - 1] != -1 && rhsShape[0] != -1 &&
+        lhsShape[lhsRank - 1] != rhsShape[0])
+      emitError("Attempt to multiply incompatible matrices.");
+
+    for (int i = 0; i < lhsRank - 2; ++i)
+      dims.emplace_back(lhsShape[i]);
+    dims.emplace_back(lhsShape[lhsRank - 2]);
   } else if (lhsShape.size() > 2 && rhsShape.size() == 2) {
     // (s1 x s2 x... x sK x M x N) MATMUL (N x P)
     // =>
@@ -443,13 +543,37 @@ void ONNXMatMulOp::inferShapes() {
 void ONNXGemmOp::inferShapes() {
   // Cannot infer shape if no shape exists.
   if (!getOperand(0).getType().isa<RankedTensorType>() ||
-      !getOperand(1).getType().isa<RankedTensorType>())
+      !getOperand(1).getType().isa<RankedTensorType>() ||
+      !getOperand(2).getType().isa<RankedTensorType>())
     return;
   auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
   auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
+  auto biasTy = getOperand(2).getType().cast<RankedTensorType>();
+
+  int64_t M, N, K_A, K_B;
+  M = (transA() == 0) ? lhsTy.getShape()[0] : lhsTy.getShape()[1];
+  K_A = (transA() == 0) ? lhsTy.getShape()[1] : lhsTy.getShape()[0];
+  N = (transB() == 0) ? rhsTy.getShape()[1] : rhsTy.getShape()[0];
+  K_B = (transB() == 0) ? rhsTy.getShape()[0] : rhsTy.getShape()[1];
+
+  if ((K_A != -1) and (K_B != -1) and (K_A != K_B)) {
+    emitError("Tensor shapes mismatched.");
+  }
+
+  // Check whether bias is unidirectional broadcasting or not.
+  auto shape = biasTy.getShape();
+  int rank = shape.size();
+  if ((rank > 2) ||
+      (rank >= 1 && shape[rank - 1] != -1 && N != -1 && N != shape[rank - 1] &&
+       shape[rank - 1] != 1) ||
+      (rank == 2 && shape[rank - 2] != -1 && M != -1 && M != shape[rank - 2] &&
+       shape[rank - 2] != 1)) {
+    emitError("Bias shape mismatched.");
+  }
+
   SmallVector<int64_t, 2> dims;
-  dims.emplace_back(lhsTy.getShape()[0]);
-  dims.emplace_back(rhsTy.getShape()[1]);
+  dims.emplace_back(M);
+  dims.emplace_back(N);
   getResult().setType(RankedTensorType::get(dims, lhsTy.getElementType()));
 }
 
@@ -515,9 +639,6 @@ void ONNXTransposeOp::inferShapes() {
   // reversing the shape of the tensor (similar to numpy.transpose).
   auto arrayTy = getOperand().getType().cast<RankedTensorType>();
   SmallVector<int64_t, 2> dims;
-
-  //if (auto permutation = getAttrOfType<ArrayAttr>(
-   //       ONNXTransposeOp::getPermAttrName())) {
   auto permutation = ONNXTransposeOp::permAttr();
   if (permutation) {
     // Perform transposition according to perm attribute.
@@ -534,6 +655,60 @@ void ONNXTransposeOp::inferShapes() {
 
 
 //===----------------------------------------------------------------------===//
+
+// ReduceMax
+
+void ONNXReduceMaxOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>()) {
+    emitError("Shape tensor not ranked.");
+    return;
+  }
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  getResult().setType(getReductionOutputType(operandTy, axes(), keepdims()));
+}
+
+//===----------------------------------------------------------------------===//
+
+// ReduceMin
+
+void ONNXReduceMinOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>()) {
+    emitError("Shape tensor not ranked.");
+    return;
+  }
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  getResult().setType(getReductionOutputType(operandTy, axes(), keepdims()));
+}
+
+//===----------------------------------------------------------------------===//
+
+// ReduceProd
+
+void ONNXReduceProdOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>()) {
+    emitError("Shape tensor not ranked.");
+    return;
+  }
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  getResult().setType(getReductionOutputType(operandTy, axes(), keepdims()));
+}
+
+//===----------------------------------------------------------------------===//
+
+// ReduceSum
+
+void ONNXReduceSumOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>()) {
+    emitError("Shape tensor not ranked.");
+    return;
+  }
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  getResult().setType(getReductionOutputType(operandTy, axes(), keepdims()));
+}
 
 // Conv
 
@@ -554,6 +729,10 @@ void ONNXConvNoBiasOp::inferShapes() {
   auto weightTy = getOperand(1).getType().cast<RankedTensorType>();
   auto dataShape = dataTy.getShape();
   auto weightShape = weightTy.getShape();
+
+  // Lowest ranked input supported is of shape (N x C x H x W).
+  if (dataShape.size() < 4)
+     emitError("Data input shape must be at least (NxCxHxW).");
 
   // Check that shape of weight and data have same length.
   if (dataShape.size() != weightShape.size())
@@ -678,6 +857,201 @@ void ONNXConvNoBiasOp::inferShapes() {
 
   dims.append(outSpatialDims.begin(), outSpatialDims.end());
   getResult().setType(RankedTensorType::get(dims, dataTy.getElementType()));
+}
+
+//===----------------------------------------------------------------------===//
+
+// MaxPoolSingleOut
+
+void ONNXMaxPoolSingleOutOp::inferShapes() {
+  // Cannot infer shape if no shape exists.
+  if (!X().getType().isa<RankedTensorType>())
+    return;
+
+  // 1) get shape of input
+  auto xTy = X().getType().cast<RankedTensorType>();
+  auto xShape = xTy.getShape();
+  auto xRank = xShape.size();
+
+  // 2) analyse parameters
+  // get kernel sizes from kernel_shape attribute 
+  auto kernelShape = kernel_shape();
+  if (!kernelShape)
+    emitError("kernel_shape is a mandatory attribute for which there is no default.");
+  auto kernelShapeArray = kernelShape.getValue();
+  auto kernelRank = kernelShape.size(); 
+  if (kernelRank > xRank)
+    emitError("kernel_shape spatial dimension is too large.");
+  auto kernelOffset = xRank - kernelRank;
+
+  // ceil mode
+  auto ceilMode = ceil_mode().getSExtValue();
+
+  // dilatation
+  SmallVector<int64_t, 4> actualDilations;
+  auto dilationsOpt = dilations();
+  if (dilationsOpt.hasValue()) {
+    auto dilationsArray = dilationsOpt.getValue().getValue(); // opt -> attr -> array
+    if (dilationsArray.size() != kernelRank)
+        emitError("dialation rank is not the same as the spatial rank.");
+    // fill in the actual values
+    for (int i = 0; i < kernelRank; ++i) {
+      int64_t d = (dilationsArray[i]).cast<IntegerAttr>().getInt();
+      if (d < 1) 
+        emitError("dialation value must be nonzero positive.");
+      actualDilations.emplace_back(d);
+    }
+  } else {
+    for(int i=0; i < kernelRank; ++i) {
+      actualDilations.emplace_back(1);      
+    }
+  }
+
+  // storage order
+  
+  // strides
+  SmallVector<int64_t, 4> actualStrides;
+  auto stridesOpt = strides();
+  if (stridesOpt.hasValue()) {
+    auto stridesArray = stridesOpt.getValue().getValue();
+    if (stridesArray.size() != kernelRank)
+        emitError("strides rank is not the same as the spatial rank.");
+    // fill in the actual values
+    for (int i = 0; i < kernelRank; ++i) {
+      int64_t s = (stridesArray[i]).cast<IntegerAttr>().getInt();
+      if (s < 1) 
+        emitError("strides value must be nonzero positive.");
+      actualStrides.emplace_back(s);
+    }
+  } else {
+    for(int i=0; i < kernelRank; ++i) {
+      actualStrides.emplace_back(1);      
+    }
+  }
+
+  // now try to find padding, getting auto_pad attribute first
+  auto autoPad = auto_pad();
+  // and then investigate the various different cases
+  SmallVector<int64_t, 4> actualPads;
+  auto defaultPads = false;
+  if (autoPad == "NOTSET") {
+    auto padsOpt = pads();
+    if (padsOpt.hasValue()) {
+      auto padsArray = padsOpt.getValue().getValue();
+      // pads consists of two entries for each spatial axis.
+      if (padsArray.size() != 2 * kernelRank)
+        emitError("pads rank is not twice the spatial rank.");
+      // fill in the actual values
+      for (int i = 0; i < 2*kernelRank; ++i) {
+        int64_t p = (padsArray[i]).cast<IntegerAttr>().getInt();
+        if (p < 0) 
+          emitError("pads value must be nonnegative.");
+        actualPads.emplace_back(p);
+      }
+    } else {
+      // pads are not defined, default to value 0
+      defaultPads = true;
+    }
+  } else if (autoPad == "VALID") {
+    defaultPads = true;
+  } else if (autoPad == "SAME_UPPER" || autoPad == "SAME_LOWER") {
+    // init pad with zero
+    for(int i=0; i<2*kernelRank; ++i) {
+      actualPads.emplace_back(0);
+    }
+    for(int i=0; i<kernelRank; ++i) {
+      auto inputSpatialShape = xShape[kernelOffset  + i];
+      auto kernelSpatialShape = (kernelShapeArray[i]).cast<IntegerAttr>().getInt();
+      auto dilations = actualDilations[i];
+      auto strideSpatialShape = actualStrides[i];
+      int64_t outputSpatialShape = ceil((1.0 * inputSpatialShape) /
+        (1.0 * strideSpatialShape));
+      auto sumOfPad = (outputSpatialShape - 1) * strideSpatialShape + 
+        ((kernelSpatialShape - 1) * dilations + 1) - inputSpatialShape;
+      actualPads[i] = actualPads[kernelRank + i] = sumOfPad / 2;
+      if (sumOfPad % 2 != 0) {
+        if (autoPad == "SAME_UPPER") {
+          actualPads[kernelRank + i] += 1;
+        } else {
+          actualPads[i] += 1;          
+        }
+      }
+    }
+  } else {
+    emitError("auto_pad of unknown / unsupported value.");
+  }
+  // handle case where default pad values must be used
+  if (defaultPads) {
+    for(int i=0; i<2*kernelRank; ++i) {
+      actualPads.emplace_back(0);
+    }
+  }
+
+  // initialize output shape 
+  SmallVector<int64_t, 4> yShape(xShape.begin(), xShape.end());
+  // for all kernel dimensions
+  for(int i=0; i<kernelRank; ++i) {
+    auto inputSpatialShape = xShape[kernelOffset  + i];
+    auto padShape = actualPads[i] + actualPads[kernelRank+i];
+    auto kernelSpatialShape = (kernelShapeArray[i]).cast<IntegerAttr>().getInt();
+    auto dilations = actualDilations[i];
+    auto strideSpatialShape = actualStrides[i];
+    ///output_spatial_shape[i] = ceil( (input_spatial_shape[i] + pad_shape[i] - 
+    //  ((kernel_spatial_shape[i] - 1) * dilations[i] + 1)) / strides_spatial_shape[i] + 1)
+    double numerator = inputSpatialShape + padShape - 
+      ((kernelSpatialShape - 1) * dilations + 1);
+    double denominator = strideSpatialShape;
+    int64_t res;
+    if (ceilMode) {
+      res = ceil(numerator / denominator) + 1;
+    } else {
+      res = floor(numerator / denominator) + 1;
+    }
+    yShape[kernelOffset + i] = res;
+  }
+  auto arrayTy = getOperand().getType().cast<RankedTensorType>();
+  getResult().setType(RankedTensorType::get(yShape, arrayTy.getElementType()));
+}
+
+//===----------------------------------------------------------------------===//
+
+// Unsqueeze
+
+void ONNXUnsqueezeOp::inferShapes() {
+  if (!getOperand().getType().isa<RankedTensorType>())
+    return;
+
+  auto operandTy = getOperand().getType().cast<RankedTensorType>();
+  int inRank = operandTy.getRank();
+
+  ArrayAttr axisAttrs = axesAttr();
+  SmallVector<int, 4> axes;
+  int outRank = 0;
+  if (axisAttrs) {
+    outRank = inRank + axisAttrs.getValue().size();
+    for (auto axisAttr : axisAttrs.getValue()) {
+      int axis = axisAttr.cast<IntegerAttr>().getInt();
+      axis = axis >= 0 ? axis : (outRank + axis);
+      // Valid range
+      assert(axis >= -outRank && axis <= outRank - 1);
+      if (std::find(axes.begin(), axes.end(), axis) == axes.end())
+        axes.emplace_back(axis);
+      else
+        emitError("Duplicated axes.");
+    }
+  } else {
+    emitError("Axes attribute is required.");
+  }
+
+  SmallVector<int64_t, 4> dims;
+  for (int i = 0, j = 0; i < outRank || j < inRank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end()) {
+      dims.emplace_back(1);
+    } else {
+      dims.emplace_back(operandTy.getShape()[j++]);
+    }
+  }
+  getResult().setType(RankedTensorType::get(dims, operandTy.getElementType()));
 }
 
 //===----------------------------------------------------------------------===//

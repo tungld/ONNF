@@ -130,56 +130,107 @@ static bool checkInsertDealloc(Operation *currentOp) {
   return insertDealloc;
 }
 
-// Insert KrnlDefineLoopsOp, KrnlOptimizeLoopsOp and KrnlIterateOp,
-// iterating along the given MemRefType dimensions. If a dimension is unknown,
-// get its value of the same index from the given operand.
-// There is no optimization in the KrnlOptimizeLoopsOp.
-KrnlIterateOp createKrnlIterateOp(Location loc, PatternRewriter &rewriter,
-                                  MemRefType memRefType, Value operand) {
-  KrnlIterateOp iterateOp;
-  // Number of loops
-  auto memRefShape = memRefType.getShape();
-  int64_t rank = memRefShape.size();
+// Create a mapping from result type's dimensions to input type's dimensions,
+// given that the result type is the result of a reduction op over the input
+// type.
+std::map<int64_t, int64_t>
+getReductionMapping(MemRefType inputTy, ArrayRef<int64_t> axes, bool keepdims) {
+  std::map<int64_t, int64_t> OutInDimMap;
+  int64_t rank = inputTy.getRank();
 
-  // Define loops.
-  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, rank);
-  std::vector<Value> originalLoops;
-  originalLoops.reserve(rank);
-  for (auto result : loopsOp.getResults()) {
-    originalLoops.push_back(result);
+  // Mark reduction axes.
+  std::vector<bool> isReductionAxis;
+  for (decltype(rank) i = 0; i < rank; ++i) {
+    if (std::find(axes.begin(), axes.end(), i) != axes.end())
+      isReductionAxis.push_back(true);
+    else
+      isReductionAxis.push_back(false);
   }
 
-  // Define loop optimization.
-  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, rank);
-  std::vector<Value> optimizedLoops;
-  optimizedLoops.reserve(rank);
-  for (auto result : optimizedLoopsOp.getResults()) {
-    optimizedLoops.push_back(result);
-  }
-  Block &optimizationBlock = optimizedLoopsOp.region().front();
-
-  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
-  for (int i = 0; i < rank; ++i) {
-    if (memRefShape[i] < 0) {
-      pack.pushConstantBound(0);
-      pack.pushOperandBound(
-          rewriter.create<DimOp>(loc, operand, i).getResult());
+  for (decltype(rank) inIndex = 0, outIndex = 0; inIndex < rank; ++inIndex) {
+    // If it is a reduction axis, there is no relationship among dimensions.
+    if (isReductionAxis[inIndex]) {
+      if (keepdims)
+        outIndex++;
     } else {
-      pack.pushConstantBound(0);
-      pack.pushConstantBound(memRefShape[i]);
+      OutInDimMap.insert(std::make_pair(outIndex, inIndex));
+      outIndex++;
     }
   }
 
+  return OutInDimMap;
+}
+
+// Add bounds associated with the op operand to the KRNL iteration pack.
+// Dynamic dimenions are supported.
+static void addDimensionToPack(ConversionPatternRewriter &rewriter,
+    Location loc, KrnlIterateOperandPack &pack, Value operand, int index) {
+  auto shape = operand.getType().cast<MemRefType>().getShape();
+  if (shape[index] < 0) {
+    pack.pushConstantBound(0);
+    pack.pushOperandBound(
+        rewriter.create<DimOp>(loc, operand, index).getResult());
+  } else {
+    pack.pushConstantBound(0);
+    pack.pushConstantBound(shape[index]);
+  }
+}
+
+// Function that defines the KRNL dialect loops and their respective
+// optimized version.
+static KrnlOptimizeLoopsOp emitOptimizedLoops(
+    ConversionPatternRewriter &rewriter, Location loc,
+    std::vector<Value> &loops, std::vector<Value> &optimizedLoops,
+    int64_t numLoops) {
+  // Define loops.
+  auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numLoops);
+  loops.reserve(numLoops);
+  for (auto result : loopsOp.getResults())
+    loops.push_back(result);
+
+  // Define optimized version of the loops.
+  auto optimizedLoopsOp = rewriter.create<KrnlOptimizeLoopsOp>(loc, numLoops);
+  optimizedLoops.reserve(numLoops);
+  for (auto result : optimizedLoopsOp.getResults())
+    optimizedLoops.push_back(result);
+
+  return optimizedLoopsOp;
+}
+
+// Function that emits the loops and their optimized version.
+// The function returns a reference to the inner optimization block.
+static Block* defineLoops(ConversionPatternRewriter &rewriter,
+    Location loc, std::vector<Value> &loops,
+    std::vector<Value> &optimizedLoops, int64_t numLoops) {
+  KrnlOptimizeLoopsOp optimizedLoopsOp = emitOptimizedLoops(
+      rewriter, loc, loops, optimizedLoops, numLoops);
+  return &optimizedLoopsOp.region().front();
+}
+
+// Function which emits a basic set of loops and optimized loops
+// for a given operation argument. A reference to the loop optimization
+// block is returned in the last argument of the function.
+static void emitKrnlLoopsAndIterationForOperand(
+    ConversionPatternRewriter &rewriter, Location loc,
+    Value operand, std::vector<Value> &originalLoops,
+    KrnlOptimizeLoopsOp &optimizedLoopsOp, KrnlIterateOp &iterateOp) {
+  // Operand shape.
+  auto shape = operand.getType().cast<MemRefType>().getShape();
+
+  // Number of loops.
+  int64_t rank = shape.size();
+
+  // Define loops and optimized loops.
+  std::vector<Value> optimizedLoops;
+  optimizedLoopsOp = emitOptimizedLoops(rewriter, loc, originalLoops,
+      optimizedLoops, rank);
+
+  KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
+  // Iterate over the loop nest.
+  for (int i = 0; i < rank; ++i)
+    addDimensionToPack(rewriter, loc, pack, operand, i);
+
   iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
-
-  // Insert any optimizations in the KrnlOptimizeLoopsOp body.
-  rewriter.setInsertionPointToEnd(&optimizationBlock);
-  // Return from KrnlOptimizeLoopsOp body.
-  // When no optimizations are present we just return the loops unchaged.
-  rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
-  rewriter.setInsertionPointAfter(iterateOp);
-
-  return iterateOp;
 }
 
 unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
@@ -279,8 +330,6 @@ getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
   return newLoopIVs;
 }
 
-
-
 namespace {
 
 // This is to get a scalar operation of a given type for a specific operation.
@@ -294,6 +343,13 @@ template <typename FOp>
 using ScalarFOp = typename ScalarOp<FOp>::FOp;
 template <typename IOp>
 using ScalarIOp = typename ScalarOp<IOp>::IOp;
+
+// Get the identity element of a operation.
+// Return NULL if the function does not have identity.
+template <typename DataType, typename Op>
+DataType getIdentityValue() {
+  return NULL;
+}
 
 //===----------------------------------------------------------------------===//
 // This is used in the innermost loop of a KrnlIterateOp to insert computation
@@ -324,9 +380,19 @@ Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
 // Besides, it is better to put operators with the same computation pattern into
 // the same category, e.g. element-wise operators will belong to the elementwise
 // category.
+
+// Math
 #include "src/pass/lower_frontend_to_krnl/math/elementwise.inc"
+#include "src/pass/lower_frontend_to_krnl/math/gemm.inc"
+#include "src/pass/lower_frontend_to_krnl/math/reduction.inc"
 #include "src/pass/lower_frontend_to_krnl/math/softmax.inc"
+// Tensor
 #include "src/pass/lower_frontend_to_krnl/tensor/reshape.inc"
+#include "src/pass/lower_frontend_to_krnl/tensor/unsqueeze.inc"
+#include "src/pass/lower_frontend_to_krnl/tensor/transpose.inc"
+#include "src/pass/lower_frontend_to_krnl/tensor/identity.inc"
+// Neural network
+#include "src/pass/lower_frontend_to_krnl/nn/conv.inc"
 
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
@@ -428,10 +494,20 @@ void FrontendToKrnlLoweringPass::runOnModule() {
   populateFuncOpTypeConversionPattern(patterns, &getContext(),
                                       tensor_to_memref_converter);
 
-  // Frontent operation lowering.
+  // Frontend operation lowering.
+  // Math
   populateLoweringONNXElementwiseOpPattern(patterns, &getContext());
-  populateLoweringONNXReshapeOpPattern(patterns, &getContext());
+  populateLoweringONNXGemmOpPattern(patterns, &getContext());
+  populateLoweringONNXReductionOpPattern(patterns, &getContext());
   populateLoweringONNXSoftmaxOpPattern(patterns, &getContext());
+  // Tensor
+  populateLoweringONNXReshapeOpPattern(patterns, &getContext());
+  populateLoweringONNXUnsqueezeOpPattern(patterns, &getContext());
+  populateLoweringONNXTransposeOpPattern(patterns, &getContext());
+  populateLoweringONNXIdentityOpPattern(patterns, &getContext());
+  // Neural network
+  populateLoweringONNXConvOpPattern(patterns, &getContext());
+  // Entry point
   patterns.insert<ONNXEntryPointLowering>(&getContext());
 
   // With the target and rewrite patterns defined, we can now attempt the

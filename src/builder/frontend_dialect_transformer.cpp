@@ -330,8 +330,8 @@ private:
    * default}
    */
   template <typename T>
-  void
-  ImportNodeOneOut(const onnx::NodeProto &node, int nIn, int nOut) {
+  void ImportNodeOneOut(const onnx::NodeProto &node, int nIn, int nOut,
+                        bool variadicIn = false, bool variadicOut = false) {
     std::vector<mlir::Value> inputs;
     for (const auto &item : node.input()) {
       if (frontend_symbols_.ContainKey(legalize_name(item))) {
@@ -348,8 +348,8 @@ private:
     auto attributes = ImportNodeAttributes(node);
 
     llvm::StringRef OpName = node.op_type();
-
-    if (nIn == inputs.size() && nOut == outputTypes.size()) {
+    if ((variadicIn || nIn == inputs.size()) &&
+        (variadicOut || nOut == outputTypes.size())) {
       auto op =
           builder_.create<T>(UnknownLoc(), outputTypes, inputs, attributes);
       frontend_symbols_.AddMapping(legalize_name(node.output()[0]),
@@ -360,8 +360,9 @@ private:
   }
 
   template <typename T>
-  void ImportNodeMultipleOuts(
-      const onnx::NodeProto &node, int nIn, int nOut) {
+  void ImportNodeMultipleOuts(const onnx::NodeProto &node, int nIn, int nOut,
+                              bool variadicIn = false,
+                              bool variadicOut = false) {
     std::vector<mlir::Value> inputs;
     for (const auto &item : node.input()) {
       if (frontend_symbols_.ContainKey(legalize_name(item))) {
@@ -379,7 +380,8 @@ private:
 
     llvm::StringRef OpName = node.op_type();
 
-    if (nIn == inputs.size() && nOut == outputTypes.size()) {
+    if ((variadicIn || nIn == inputs.size()) &&
+        (variadicOut || nOut == outputTypes.size())) {
       auto op =
           builder_.create<T>(UnknownLoc(), outputTypes, inputs, attributes);
       for (int i = 0; i < node.output().size(); i++) {
@@ -429,6 +431,30 @@ private:
     } else {
       ImportNodeMultipleOuts<mlir::ONNXMaxPoolOp>(
           node, nIn, nOuts);
+    }
+  }
+
+  /*!
+   * Special handle for Gemm operations.
+   */
+  void ImportNodeGemm(onnx::NodeProto node, int nIn, int nOut) {
+    int nOps = node.input().size();
+    if (nOps == 2) {
+      ImportNodeOneOut<mlir::ONNXGemmNoBiasOp>(node, 2, nOut);
+    } else {
+      ImportNodeOneOut<mlir::ONNXGemmOp>(node, nIn, nOut);
+    }
+  }
+
+  /*!
+   * Special handle for Pad operations.
+   */
+  void ImportNodePad(onnx::NodeProto node, int nIn, int nOut) {
+    int nOps = node.input().size();
+    if (nOps == 2) {
+      ImportNodeOneOut<mlir::ONNXPadConstantValueOp>(node, 2, nOut);
+    } else {
+      ImportNodeOneOut<mlir::ONNXPadOp>(node, nIn, nOut);
     }
   }
 

@@ -103,6 +103,7 @@ public:
         op->getName().getStringRef() != "onnx.Reciprocal" &&
         op->getName().getStringRef() != "onnx.Softplus" &&
         op->getName().getStringRef() != "onnx.Softsign" &&
+        op->getName().getStringRef() != "onnx.Sign" &&
         op->getName().getStringRef() != "onnx.Mul" &&
         op->getName().getStringRef() != "onnx.Add" &&
         op->getName().getStringRef() != "onnx.Div" &&
@@ -112,6 +113,7 @@ public:
         op->getName().getStringRef() != "onnx.Xor" &&
         op->getName().getStringRef() != "onnx.Sum" &&
         op->getName().getStringRef() != "onnx.Max" &&
+        op->getName().getStringRef() != "onnx.MaxPoolSingleOut" &&
         op->getName().getStringRef() != "onnx.Min" &&
         op->getName().getStringRef() != "onnx.Identity" &&
         op->getName().getStringRef() != "onnx.MatMul" &&
@@ -119,8 +121,14 @@ public:
         op->getName().getStringRef() != "onnx.GemmNoBias" &&
         op->getName().getStringRef() != "onnx.Reshape" &&
         op->getName().getStringRef() != "onnx.Transpose" &&
+        op->getName().getStringRef() != "onnx.ReduceMax" &&
+        op->getName().getStringRef() != "onnx.ReduceMin" &&
+        op->getName().getStringRef() != "onnx.ReduceProd" &&
+        op->getName().getStringRef() != "onnx.ReduceSum" &&
         op->getName().getStringRef() != "onnx.Softmax" &&
-        op->getName().getStringRef() != "onnx.ConvNoBias")
+        op->getName().getStringRef() != "onnx.Sqrt" &&
+        op->getName().getStringRef() != "onnx.ConvNoBias" &&
+        op->getName().getStringRef() != "onnx.Unsqueeze")
       return false;
     return llvm::any_of(op->getResultTypes(), [](Type result_type) {
       return !result_type.isa<RankedTensorType>();
