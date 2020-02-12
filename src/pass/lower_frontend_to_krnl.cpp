@@ -1286,42 +1286,72 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
                   ConversionPatternRewriter &rewriter) const final {
     auto loc = op->getLoc();
 
-    // Insert an allocation and deallocation for the result of this operation.
     auto memRefType = convertToMemRefType(*op->result_type_begin());
+    auto memRefShape = memRefType.getShape();
+    auto inputShape = operands[0].getType().cast<MemRefType>().getShape();
+
+    // Insert an allocation and deallocation for the result of this operation.
     Value alloc;
 
-    // Compute size in bytes.
+    // Compute size in bytes using the input tensor.
     Value tensorSize = rewriter.create<ConstantOp>(
         loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
                                      getMemRefEltSizeInBytes(memRefType)));
+    for (int i = 0; i < inputShape.size(); ++i) {
+      Value dimVal;
+      if (inputShape[i] < 0) {
+        Value dim = rewriter.create<DimOp>(loc, operands[0], i);
+        dimVal =
+            rewriter.create<IndexCastOp>(loc, dim, rewriter.getIntegerType(64));
+      } else {
+        dimVal = rewriter.create<ConstantOp>(
+            loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                         inputShape[i]));
+      }
+      tensorSize = rewriter.create<MulIOp>(loc, tensorSize, dimVal);
+    }
+
     bool insertDealloc = checkInsertDealloc(op);
     if (hasAllConstantDimensions(memRefType)) {
       alloc = insertAllocAndDealloc(memRefType, loc, rewriter, insertDealloc);
     } else {
-      auto memRefShape = memRefType.getShape();
-      auto inputShape = operands[0].getType().cast<MemRefType>().getShape();
-      SmallVector<Value, 4> allocOperands;
+      // If a dimension is zero, the actual dimension value is taken from the
+      // input tensor.
+      //
+      // If the shape array has a negative dimension (-1), we compute its actual
+      // dimension value from the other dimensions. But we don't have enough
+      // information about the other dimensions at this point. So, we need to
+      // scan the shape first to calculate reduction of all of the dimensions.
+      // If the reduction is negative, then the shape array contains a negative
+      // dimension. Otherwise, the reduction is the same as the one computed
+      // from the input tensor.
+      Value tensorSizeFromShape = rewriter.create<ConstantOp>(
+          loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64),
+                                       getMemRefEltSizeInBytes(memRefType)));
+      SmallVector<Value, 4> DimInfo;
       for (int i = 0; i < memRefShape.size(); ++i) {
-        // The shape array can always be used to construct shape information of
-        // the result.
         Value index = rewriter.create<ConstantOp>(
             loc, rewriter.getIntegerAttr(rewriter.getIndexType(), i));
         // Load index from array of indices.
         Value loadedVal = rewriter.create<LoadOp>(loc, operands[1], index);
         // If a dimension is zero, the actual dimension value is taken from the
         // input tensor.
+        //
+        // If a dimension is negative, it is computed from the other dimensions.
+        // But we don't have enough information about the other dimensions at
+        // this point. So, we let it as it is (-1), and compute it later.
         if (i < inputShape.size()) {
           Value dimVal;
-          auto dimTy = loadedVal.getType().cast<IntegerType>();
+          auto loadedValType = loadedVal.getType().cast<IntegerType>();
           if (inputShape[i] < 0) {
             Value dim = rewriter.create<DimOp>(loc, operands[0], i);
-            dimVal = rewriter.create<IndexCastOp>(loc, dim, dimTy);
+            dimVal = rewriter.create<IndexCastOp>(loc, dim, loadedValType);
           } else {
             dimVal = rewriter.create<ConstantOp>(
-                loc, rewriter.getIntegerAttr(dimTy, inputShape[i]));
+                loc, rewriter.getIntegerAttr(loadedValType, inputShape[i]));
           }
           auto zero = rewriter.create<ConstantOp>(
-              loc, rewriter.getIntegerAttr(dimTy, 0));
+              loc, rewriter.getIntegerAttr(loadedValType, 0));
           auto isZero =
               rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, loadedVal, zero);
           loadedVal = rewriter.create<SelectOp>(loc, isZero, dimVal, loadedVal);
@@ -1332,9 +1362,36 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
         if (loadedVal.getType().cast<IntegerType>().getWidth() < 64)
           int64LoadedVal = rewriter.create<ZeroExtendIOp>(
               loc, loadedVal, rewriter.getIntegerType(64));
-        tensorSize = rewriter.create<MulIOp>(loc, tensorSize, int64LoadedVal);
+        tensorSizeFromShape =
+            rewriter.create<MulIOp>(loc, tensorSizeFromShape, int64LoadedVal);
+        // Store intermediate results to use later.
+        DimInfo.emplace_back(int64LoadedVal);
+      }
+      // Reverse tensorSizeFromShape since it is negative if the shape array has
+      // a negative dimension. This is safe since we only use it to compute the
+      // actual value for the negative dimension.
+      auto zero = rewriter.create<ConstantOp>(
+          loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64), 0));
+      tensorSizeFromShape =
+          rewriter.create<SubIOp>(loc, zero, tensorSizeFromShape);
+
+      // Obtain operands for AllocOp.
+      SmallVector<Value, 4> allocOperands;
+      auto negOne = rewriter.create<ConstantOp>(
+          loc, rewriter.getIntegerAttr(rewriter.getIntegerType(64), -1));
+
+      for (int i = 0; i < memRefShape.size(); ++i) {
+        auto dimVal = DimInfo[i];
+        auto isNegOne =
+            rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dimVal, negOne);
+        // If dimension is negative, compute its value from the other
+        // dimensions.
+        auto actualDimVal =
+            rewriter.create<SignedDivIOp>(loc, tensorSize, tensorSizeFromShape);
+        auto loadedVal =
+            rewriter.create<SelectOp>(loc, isNegOne, actualDimVal, dimVal);
         allocOperands.push_back(rewriter.create<IndexCastOp>(
-              loc, loadedVal, rewriter.getIndexType()));
+            loc, loadedVal, rewriter.getIndexType()));
       }
       AllocOp allocateMemref =
           rewriter.create<AllocOp>(loc, memRefType, allocOperands);
@@ -1752,6 +1809,8 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
     //
     // The loop nest will look as follows:
     //
+    // strides = [s1, s2]
+    //
     // kernelsPerGroup = M / group;
     // for n = 0 .. N:
     //   for g = 0 .. group:
@@ -1764,8 +1823,13 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
     //             for k1 = 0 .. KH:
     //               for k2 = 0 .. KW:
     //                 R[n][kernel][r1][r2] =
-    //                   D[n][g * (C / group) + c][r1 + k1][r2 + k2] *
+    //                   D[n][g * (C / group) + c][s1 * r1 + k1][s2 * r2 + k2] *
     //                   K[kernel][c][k1][k2];
+    //
+    // Naming:
+    //   n, g, m: outer loop nest indices
+    //   r1, r2: spatial loop nest indices
+    //   c, k1, k2: inner loop nest indices
     //
     // TODO: handle padding.
     //
@@ -1913,7 +1977,7 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
         {
           // 4. Emit inner loop body
           // R[n][kernel][r1][r2] =
-          //   D[n][g * (C / group) + c][r1 + k1][r2 + k2] *
+          //   D[n][g * (C / group) + c][s1 * r1 + k1][s2 * r2 + k2] *
           //   K[kernel][c][k1][k2];
 
           // 4.1 Prepare indices for accesing the data tensor.
@@ -1927,12 +1991,24 @@ struct ONNXConvNoBiasOpLowering : public ConversionPattern {
                 rewriter.create<MulIOp>(loc, subchannels,
                     outerIterationBlock.getArguments()[1]));
           dataIndices.emplace_back(channelDepth);
-          // rX + kX
-          for (int i = 0; i < kernelShape.size() - 2; ++i)
+          // sX * rX + kX
+          auto stridesAttribute = convOp.stridesAttr();
+          // Read strides attribute
+          SmallVector<int, 4> strides;
+          if (stridesAttribute)
+            for (auto stride : stridesAttribute.getValue())
+              strides.emplace_back(stride.cast<IntegerAttr>().getInt());
+          for (int i = 0; i < kernelShape.size() - 2; ++i) {
+            Value spatialIndex = spatialIterationBlock.getArguments()[i];
+            // If strides are present then emit the correct access index.
+            if (stridesAttribute && strides[i] > 1)
+              spatialIndex = rewriter.create<MulIOp>(loc,
+                  rewriter.create<ConstantIndexOp>(loc, strides[i]),
+                  spatialIterationBlock.getArguments()[i]);
             dataIndices.emplace_back(
-                rewriter.create<AddIOp>(loc,
-                    spatialIterationBlock.getArguments()[i],
+                rewriter.create<AddIOp>(loc, spatialIndex,
                     innerIterationBlock.getArguments()[i+1]));
+          }
 
           // 4.2 Prepare indices for accessing the kernel tensor.
           SmallVector<Value, 4> kernelIndices;

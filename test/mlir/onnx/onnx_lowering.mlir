@@ -302,38 +302,69 @@ func @test_reshape(%arg0 : tensor<?x10xf32>, %arg1 : tensor<4xi32>) -> tensor<*x
   "std.return"(%0) : (tensor<*xf32>) -> ()
 
   // CHECK-LABEL: test_reshape
-  // CHECK: [[TYPE_IN_BYTES:%.+]] = constant 4 : i64
-  // CHECK: %[[INDEX_0:.+]] = constant 0 : index
-  // CHECK: [[LOAD_0:%.+]] = load %arg1[%[[INDEX_0]]] : memref<4xi32>
+  // CHECK: [[TYPE_IN_BYTES_0:%.+]] = constant 4 : i64
   // CHECK: [[DIM_0:%.+]] = dim %arg0, 0 : memref<?x10xf32>
-  // CHECK: [[DIM_0_CAST:%.+]] = index_cast [[DIM_0]] : index to i32
-  // CHECK: [[CONSTANT_0:%.+]] = constant 0 : i32
-  // CHECK: [[CMP:%.+]] = cmpi "eq", [[LOAD_0]], [[CONSTANT_0]] : i32
-  // CHECK: [[SELECT_0:%.+]] = select [[CMP]], [[DIM_0_CAST]], [[LOAD_0]] : i32
-  // CHECK: [[EXT_0:%.+]] = zexti [[SELECT_0]] : i32 to i64
-  // CHECK: [[MUL_0:%.+]] = muli [[TYPE_IN_BYTES]], [[EXT_0]] : i64
-  // CHECK: [[CAST_0:%.+]] = index_cast [[SELECT_0]] : i32 to index
-  // CHECK: %[[INDEX_1:.+]] = constant 1 : index
-  // CHECK: [[LOAD_1:%.+]] = load %arg1[%[[INDEX_1]]] : memref<4xi32>
-  // CHECK: [[CONSTANT_1:%.+]] = constant 10 : i32
+  // CHECK: [[DIM_0_CAST:%.+]] = index_cast [[DIM_0]] : index to i64
+  // CHECK: [[MUL_0:%.+]] = muli [[TYPE_IN_BYTES_0]], [[DIM_0_CAST]] : i64
+  // CHECK: [[CONSTANT_0:%.+]] = constant 10 : i64
+  // CHECK: [[TENSOR_SIZE:%.+]] = muli [[MUL_0]], [[CONSTANT_0]] : i64
+
+  // CHECK: [[TYPE_IN_BYTES_1:%.+]] = constant 4 : i64
+  // CHECK: %[[CONSTANT_1:.+]] = constant 0 : index
+  // CHECK: [[LOAD_0:%.+]] = load %arg1[%[[CONSTANT_1]]] : memref<4xi32>
+  // CHECK: [[DIM_1:%.+]] = dim %arg0, 0 : memref<?x10xf32>
+  // CHECK: [[DIM_1_CAST:%.+]] = index_cast [[DIM_1]] : index to i32
   // CHECK: [[CONSTANT_2:%.+]] = constant 0 : i32
-  // CHECK: [[CMP_1:%.+]] = cmpi "eq", [[LOAD_1]], [[CONSTANT_2]] : i32
-  // CHECK: [[SELECT_1:%.+]] = select [[CMP_1]], [[CONSTANT_1]], [[LOAD_1]] : i32
-  // CHECK: [[EXT_1:%.+]] = zexti [[SELECT_1]] : i32 to i64
-  // CHECK: [[MUL_1:%.+]] = muli [[MUL_0]], [[EXT_1]] : i64
-  // CHECK: [[CAST_1:%.+]] = index_cast [[SELECT_1]] : i32 to index
-  // CHECK: %[[INDEX_2:.+]] = constant 2 : index
-  // CHECK: [[LOAD_2:%.+]] = load %arg1[%[[INDEX_2]]] : memref<4xi32>
-  // CHECK: [[EXT_2:%.+]] = zexti [[LOAD_2]] : i32 to i64
-  // CHECK: [[MUL_2:%.+]] = muli [[MUL_1]], [[EXT_2]] : i64
-  // CHECK: [[CAST_2:%.+]] = index_cast [[LOAD_2]] : i32 to index
-  // CHECK: %[[INDEX_3:.+]] = constant 3 : index
-  // CHECK: [[LOAD_3:%.+]] = load %arg1[%[[INDEX_3]]] : memref<4xi32>
-  // CHECK: [[EXT_3:%.+]] = zexti [[LOAD_3]] : i32 to i64
-  // CHECK: [[MUL_3:%.+]] = muli [[MUL_2]], [[EXT_3]] : i64
-  // CHECK: [[CAST_3:%.+]] = index_cast [[LOAD_3]] : i32 to index
+  // CHECK: [[CMP_0:%.+]] = cmpi "eq", [[LOAD_0]], [[CONSTANT_2]] : i32
+  // CHECK: [[SELECT_0:%.+]] = select [[CMP_0]], [[DIM_1_CAST]], [[LOAD_0]] : i32
+  // CHECK: [[ZEXTI_0:%.+]] = zexti [[SELECT_0]] : i32 to i64
+  // CHECK: [[MUL_1:%.+]] = muli [[TYPE_IN_BYTES_1]], [[ZEXTI_0]] : i64
+
+  // CHECK: %[[CONSTANT_3:.+]] = constant 1 : index
+  // CHECK: [[LOAD_1:%.+]] = load %arg1[%[[CONSTANT_3]]] : memref<4xi32>
+  // CHECK: [[CONSTANT_3:%.+]] = constant 10 : i32
+  // CHECK: [[CONSTANT_4:%.+]] = constant 0 : i32
+  // CHECK: [[CMP_1:%.+]] = cmpi "eq", [[LOAD_1]], [[CONSTANT_4]] : i32
+  // CHECK: [[SELECT_1:%.+]] = select [[CMP_1]], [[CONSTANT_3]], [[LOAD_1]] : i32
+  // CHECK: [[ZEXTI_1:%.+]] = zexti [[SELECT_1]] : i32 to i64
+  // CHECK: [[MUL_2:%.+]] = muli [[MUL_1]], [[ZEXTI_1]] : i64
+
+  // CHECK: %[[CONSTANT_5:.+]] = constant 2 : index
+  // CHECK: [[LOAD_2:%.+]] = load %arg1[%[[CONSTANT_5]]] : memref<4xi32>
+  // CHECK: [[ZEXTI_2:%.+]] = zexti [[LOAD_2]] : i32 to i64
+  // CHECK: [[MUL_3:%.+]] = muli [[MUL_2]], [[ZEXTI_2]] : i64
+
+  // CHECK: %[[CONSTANT_6:.+]] = constant 3 : index
+  // CHECK: [[LOAD_3:%.+]] = load %arg1[%[[CONSTANT_6]]] : memref<4xi32>
+  // CHECK: [[ZEXTI_3:%.+]] = zexti [[LOAD_3]] : i32 to i64
+  // CHECK: [[MUL_4:%.+]] = muli [[MUL_3]], [[ZEXTI_3]] : i64
+
+  // CHECK: [[CONSTANT_7:%.+]] = constant 0 : i64
+  // CHECK: [[SUB_0:%.+]] = subi [[CONSTANT_7]], [[MUL_4]] : i64
+
+  // CHECK: [[CONSTANT_8:%.+]] = constant -1 : i64
+  // CHECK: [[CMP_2:%.+]] = cmpi "eq", [[ZEXTI_0]], [[CONSTANT_8]] : i64
+  // CHECK: [[DIVISIGNED_0:%.+]] = divi_signed [[TENSOR_SIZE]], [[SUB_0]] : i64
+  // CHECK: [[SELECT_2:%.+]] = select [[CMP_2]], [[DIVISIGNED_0]], [[ZEXTI_0]] : i64
+  // CHECK: [[CAST_0:%.+]] = index_cast [[SELECT_2]] : i64 to index
+
+  // CHECK: [[CMP_3:%.+]] = cmpi "eq", [[ZEXTI_1]], [[CONSTANT_8]] : i64
+  // CHECK: [[DIVISIGNED_1:%.+]] = divi_signed [[TENSOR_SIZE]], [[SUB_0]] : i64
+  // CHECK: [[SELECT_3:%.+]] = select [[CMP_3]], [[DIVISIGNED_1]], [[ZEXTI_1]] : i64
+  // CHECK: [[CAST_1:%.+]] = index_cast [[SELECT_3]] : i64 to index
+
+  // CHECK: [[CMP_4:%.+]] = cmpi "eq", [[ZEXTI_2]], [[CONSTANT_8]] : i64
+  // CHECK: [[DIVISIGNED_2:%.+]] = divi_signed [[TENSOR_SIZE]], [[SUB_0]] : i64
+  // CHECK: [[SELECT_4:%.+]] = select [[CMP_4]], [[DIVISIGNED_2]], [[ZEXTI_2]] : i64
+  // CHECK: [[CAST_2:%.+]] = index_cast [[SELECT_4]] : i64 to index
+
+  // CHECK: [[CMP_5:%.+]] = cmpi "eq", [[ZEXTI_3]], [[CONSTANT_8]] : i64
+  // CHECK: [[DIVISIGNED_3:%.+]] = divi_signed [[TENSOR_SIZE]], [[SUB_0]] : i64
+  // CHECK: [[SELECT_5:%.+]] = select [[CMP_5]], [[DIVISIGNED_3]], [[ZEXTI_3]] : i64
+  // CHECK: [[CAST_3:%.+]] = index_cast [[SELECT_5]] : i64 to index
+
   // CHECK: [[ALLOC:%.+]] = alloc([[CAST_0]], [[CAST_1]], [[CAST_2]], [[CAST_3]]) : memref<?x?x?x?xf32>
-  // CHECK: "krnl.memcpy"([[ALLOC]], %arg0, [[MUL_3]]) : (memref<?x?x?x?xf32>, memref<?x10xf32>, i64) -> ()
+  // CHECK: "krnl.memcpy"([[ALLOC]], %arg0, [[TENSOR_SIZE]]) : (memref<?x?x?x?xf32>, memref<?x10xf32>, i64) -> ()
   // CHECK: return [[ALLOC]] : memref<?x?x?x?xf32>
 }
 
@@ -987,4 +1018,51 @@ func @test_conv_no_bias_no_pad_w_group(%arg0 : tensor<1x9x32x64xf32>, %arg1 : te
   // CHECK: }
 
   // CHECK: return [[RES]] : memref<1x5x27x58xf32>
+}
+
+func @test_conv_no_bias_no_pad_w_strides(%arg0 : tensor<1x9x32x64xf32>, %arg1 : tensor<5x9x6x7xf32>) -> tensor<*xf32> {
+  %0 = "onnx.ConvNoBias"(%arg0, %arg1) {auto_pad = "NOTSET", group = 1 : i64, strides = [2, 2]} : (tensor<1x9x32x64xf32>, tensor<5x9x6x7xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+
+  // CHECK-LABEL: test_conv_no_bias_no_pad_w_strides
+  // CHECK: [[RES:%.+]] = alloc() : memref<1x5x14x29xf32>
+  // CHECK: [[CONST0:%.+]] = constant 5 : index
+  // CHECK: [[CONST1:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[CONST2:%.+]] = constant 9 : index
+  // CHECK: [[OUTER_LOOPS:%.+]]:2 = krnl.define_loops 2
+  // CHECK: [[OPT_OUTER_LOOPS:%.+]]:2 = krnl.optimize_loops  {
+  // CHECK: krnl.return_loops [[OUTER_LOOPS]]#0, [[OUTER_LOOPS]]#1
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop)
+
+  // CHECK: krnl.iterate([[OPT_OUTER_LOOPS]]#0, [[OPT_OUTER_LOOPS]]#1) with ([[OUTER_LOOPS]]#0 -> %arg2 = 0 to 1, [[OUTER_LOOPS]]#1 -> %arg3 = 0 to 5) {
+  // CHECK: [[SPATIAL_LOOPS:%.+]]:2 = krnl.define_loops 2
+  // CHECK: [[OPT_SPATIAL_LOOPS:%.+]]:2 = krnl.optimize_loops  {
+  // CHECK: krnl.return_loops [[SPATIAL_LOOPS]]#0, [[SPATIAL_LOOPS]]#1
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop)
+
+  // CHECK: krnl.iterate([[OPT_SPATIAL_LOOPS]]#0, [[OPT_SPATIAL_LOOPS]]#1) with ([[SPATIAL_LOOPS]]#0 -> %arg4 = 0 to 14, [[SPATIAL_LOOPS]]#1 -> %arg5 = 0 to 29) {
+  // CHECK: store [[CONST1]], [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<1x5x14x29xf32>
+  // CHECK: [[INNER_LOOPS:%.+]]:3 = krnl.define_loops 3
+  // CHECK: [[OPT_INNER_LOOPS:%.+]]:3 = krnl.optimize_loops  {
+  // CHECK: krnl.return_loops [[INNER_LOOPS]]#0, [[INNER_LOOPS]]#1, [[INNER_LOOPS]]#2
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop, !krnl.loop)
+
+  // CHECK: krnl.iterate([[OPT_INNER_LOOPS]]#0, [[OPT_INNER_LOOPS]]#1, [[OPT_INNER_LOOPS]]#2) with ([[INNER_LOOPS]]#0 -> %arg6 = 0 to 9, [[INNER_LOOPS]]#1 -> %arg7 = 0 to 6, [[INNER_LOOPS]]#2 -> %arg8 = 0 to 7) {
+  // CHECK: [[CONST_STRIDE1:%.+]] = constant 2 : index
+  // CHECK: [[MUL1:%.+]] = muli [[CONST_STRIDE1]], %arg4 : index
+  // CHECK: [[R1PLUSK1:%.+]] = addi [[MUL1]], %arg7 : index
+  // CHECK: [[CONST_STRIDE2:%.+]] = constant 2 : index
+  // CHECK: [[MUL2:%.+]] = muli [[CONST_STRIDE2]], %arg5 : index
+  // CHECK: [[R2PLUSK2:%.+]] = addi [[MUL2]], %arg8 : index
+  // CHECK: [[DATA:%.+]] = load %arg0[%arg2, %arg6, [[R1PLUSK1]], [[R2PLUSK2]]] : memref<1x9x32x64xf32>
+  // CHECK: [[KERNEL:%.+]] = load %arg1[%arg3, %arg6, %arg7, %arg8] : memref<5x9x6x7xf32>
+  // CHECK: [[ACC_RES:%.+]] = load %0[%arg2, %arg3, %arg4, %arg5] : memref<1x5x14x29xf32>
+  // CHECK: [[MUL:%.+]] = mulf [[DATA]], [[KERNEL]] : f32
+  // CHECK: [[ADD:%.+]] = addf [[ACC_RES]], [[MUL]] : f32
+  // CHECK: store [[ADD]], [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<1x5x14x29xf32>
+  // CHECK: }
+  // CHECK: }
+  // CHECK: }
+
+  // CHECK: return [[RES]] : memref<1x5x14x29xf32>
 }
