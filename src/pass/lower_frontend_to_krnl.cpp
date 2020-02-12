@@ -2174,8 +2174,8 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     std::vector<Value> optimizedLoopsInit;
     KrnlIterateOp iterateOpInit;
     Block *optimizationBlockInit = emitKrnlLoopsAndIterationForOperand(
-        rewriter, loc, originalLoopsInit, optimizedLoopsInit, iterateOpInit,
-        alloc);
+        rewriter, loc, alloc, originalLoopsInit, optimizedLoopsInit,
+        iterateOpInit);
     Block &iterationBlockInit = iterateOpInit.bodyRegion().front();
 
     // Perform the insertions into the body of the initialization loop.
@@ -2210,8 +2210,8 @@ struct ONNXReductionOpLowering : public ConversionPattern {
     rewriter.setInsertionPointAfter(iterateOpInit);
     std::vector<Value> originalLoops, optimizedLoops;
     KrnlIterateOp iterateOp;
-    Block *optimizationBlockInit = emitKrnlLoopsAndIterationForOperand(
-        rewriter, loc, originalLoops, optimizedLoops, iterateOp, operands[0]);
+    Block *optimizationBlock = emitKrnlLoopsAndIterationForOperand(
+        rewriter, loc, operands[0], originalLoops, optimizedLoops, iterateOp);
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // Perform the insertions into the body of the reduction loop.
