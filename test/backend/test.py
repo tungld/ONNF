@@ -250,8 +250,8 @@ test_to_enable = [
     "test_sign_cpu",
 
     # BatchNormalization (test mode)
-    #"test_batchnorm_epsilon_cpu", <- segmentation fault, why?
-    #"test_batchnorm_example_cpu", <- segmentation fault, why?
+    "test_batchnorm_epsilon_cpu",
+    "test_batchnorm_example_cpu",
 
 ]
 
