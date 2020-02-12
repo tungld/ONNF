@@ -208,12 +208,12 @@ static Block* defineLoops(ConversionPatternRewriter &rewriter,
 }
 
 // Function which emits a basic set of loops and optimized loops
-// for a given operation argument. A reference to the loop optimization
-// block is returned in the last argument of the function.
-static void emitKrnlLoopsAndIterationForOperand(
+// for a given operation argument. The function return a reference to the inner
+// optimization block.
+static Block* emitKrnlLoopsAndIterationForOperand(
     ConversionPatternRewriter &rewriter, Location loc,
     Value operand, std::vector<Value> &originalLoops,
-    KrnlOptimizeLoopsOp &optimizedLoopsOp, KrnlIterateOp &iterateOp) {
+    std::vector<Value> &optimizedLoops, KrnlIterateOp &iterateOp) {
   // Operand shape.
   auto shape = operand.getType().cast<MemRefType>().getShape();
 
@@ -221,9 +221,8 @@ static void emitKrnlLoopsAndIterationForOperand(
   int64_t rank = shape.size();
 
   // Define loops and optimized loops.
-  std::vector<Value> optimizedLoops;
-  optimizedLoopsOp = emitOptimizedLoops(rewriter, loc, originalLoops,
-      optimizedLoops, rank);
+  auto optimizedLoopsOp =
+      emitOptimizedLoops(rewriter, loc, originalLoops, optimizedLoops, rank);
 
   KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
   // Iterate over the loop nest.
@@ -231,6 +230,8 @@ static void emitKrnlLoopsAndIterationForOperand(
     addDimensionToPack(rewriter, loc, pack, operand, i);
 
   iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
+
+  return &optimizedLoopsOp.region().front();
 }
 
 unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
@@ -1083,22 +1084,17 @@ struct ONNXElementwiseUnaryOpLowering : public ConversionPattern {
                                     {operands[0]});
 
     std::vector<Value> originalLoops;
-    KrnlOptimizeLoopsOp optimizedLoopsOp;
+    std::vector<Value> optimizedLoops;
     KrnlIterateOp iterateOp;
-    emitKrnlLoopsAndIterationForOperand(
-        rewriter, loc, operands[0], originalLoops,
-        optimizedLoopsOp, iterateOp);
-    Block &optimizationBlock = optimizedLoopsOp.region().front();
+    Block *optimizationBlock = emitKrnlLoopsAndIterationForOperand(
+        rewriter, loc, operands[0], originalLoops, optimizedLoops, iterateOp);
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // 1. Insert any optimizations in the KrnlOptimizeLoopsOp body.
-    rewriter.setInsertionPointToEnd(&optimizationBlock);
-    // Return from KrnlOptimizeLoopsOp body.
-    // When no optimizations are present we just return the loops
-    // unchaged.
+    rewriter.setInsertionPointToEnd(optimizationBlock);
     rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
 
-    // 2. Insert instructions inside the KernelIterateOp body.
+    // 2. Insert instructions inside the KrnlIterateOp body.
     rewriter.setInsertionPointToStart(&iterationBlock);
 
     // Handle the operation:
@@ -1156,21 +1152,17 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
         getBroadcastedDimInfo(loc, rewriter, memRefType, operands);
 
     std::vector<Value> originalLoops;
-    KrnlOptimizeLoopsOp optimizedLoopsOp;
+    std::vector<Value> optimizedLoops;
     KrnlIterateOp iterateOp;
-    emitKrnlLoopsAndIterationForOperand(
-        rewriter, loc, alloc, originalLoops,
-        optimizedLoopsOp, iterateOp);
-    Block &optimizationBlock = optimizedLoopsOp.region().front();
+    Block *optimizationBlock = emitKrnlLoopsAndIterationForOperand(
+        rewriter, loc, alloc, originalLoops, optimizedLoops, iterateOp);
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
     // 1. Insert any optimizations in the KrnlOptimizeLoopsOp body.
-    rewriter.setInsertionPointToEnd(&optimizationBlock);
-    // Return from KrnlOptimizeLoopsOp body.
-    // When no optimizations are present we just return the loops unchaged.
+    rewriter.setInsertionPointToEnd(optimizationBlock);
     rewriter.create<KrnlReturnLoopsOp>(loc, originalLoops);
 
-    // 2. Insert instructions inside the KernelIterateOp body.
+    // 2. Insert instructions inside the KrnlIterateOp body.
     rewriter.setInsertionPointToStart(&iterationBlock);
 
     // Handle the operation:
