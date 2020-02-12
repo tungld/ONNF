@@ -176,17 +176,18 @@ static void addDimensionToPack(ConversionPatternRewriter &rewriter,
   }
 }
 
-// Function that create an iterate operand pack for induction variables over an
+// Function that create an iterate operand pack for KrnlIterateOp whose
+// induction variables' upper bounds are obtained from the shape of a given
 // operand.
-KrnlIterateOperandPack createIterateOperandPackForOperand(
+KrnlIterateOperandPack createIteratePackFromOperand(
     ConversionPatternRewriter &rewriter, Location loc,
     ArrayRef<Value> originalLoops, ArrayRef<Value> optimizedLoops,
     Value operand, ArrayRef<int> loopsAxes = {}, ArrayRef<int> axes = {}) {
   // `loopsAxes` and `axes` are lists of non-duplicated ints. Negative axis is
   // supported.
   //
-  // `loopsAxes` is a list of axes of induction variables in the vectors of the
-  // original and optimized loops. By default, use all induction variables.
+  // `loopsAxes` is a list of axes of induction variables in the original loop.
+  // By default, use all induction variables.
   //
   // `axes` is a list of axes in the operand's shape, which will be used
   // to get upper bounds for corresponding induction variables in `loopsAxes`.
@@ -300,8 +301,8 @@ static Block *emitKrnlLoopsAndIterationForOperand(
       emitOptimizedLoops(rewriter, loc, originalLoops, optimizedLoops, rank);
 
   // Define KrnlIterateOp.
-  auto pack = createIterateOperandPackForOperand(
-      rewriter, loc, originalLoops, optimizedLoops, operand, axes, axes);
+  auto pack = createIteratePackFromOperand(rewriter, loc, originalLoops,
+                                           optimizedLoops, operand, axes, axes);
   iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
 
   return &optimizedLoopsOp.region().front();
@@ -1208,14 +1209,14 @@ struct ONNXSoftmaxOpLowering : public ConversionPattern {
         innerAxes.emplace_back(i);
     }
     // Define an outer loop with respect to axis.
-    auto outerPack = createIterateOperandPackForOperand(
-        rewriter, loc, originalLoops, optimizedLoops, operands[0], outerAxes,
-        outerAxes);
+    auto outerPack = createIteratePackFromOperand(rewriter, loc, originalLoops,
+                                                  optimizedLoops, operands[0],
+                                                  outerAxes, outerAxes);
 
     // Define an inner loop with respect to axis.
-    auto innerPack = createIterateOperandPackForOperand(
-        rewriter, loc, originalLoops, optimizedLoops, operands[0], innerAxes,
-        innerAxes);
+    auto innerPack = createIteratePackFromOperand(rewriter, loc, originalLoops,
+                                                  optimizedLoops, operands[0],
+                                                  innerAxes, innerAxes);
 
     KrnlIterateOp outerIterateOp, maxIterateOp, sumIterateOp, softmaxIterateOp;
     SmallVector<Value, 4> outerLoopIVs;
@@ -1533,7 +1534,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // - Reduction loop iterates over the reduction dimension.
 
     // Outer loop
-    auto outerPack = createIterateOperandPackForOperand(
+    auto outerPack = createIteratePackFromOperand(
         rewriter, loc, originalLoops, optimizedLoops, alloc, {0, 1}, {0, 1});
 
     // Reduction loop
@@ -1749,8 +1750,8 @@ struct ONNXTransposeOpLowering : public ConversionPattern {
         optimizedLoops, rank);
 
     // Iterate over the loop nest using the input shape.
-    auto pack = createIterateOperandPackForOperand(rewriter, loc, originalLoops,
-                                                   optimizedLoops, operands[0]);
+    auto pack = createIteratePackFromOperand(rewriter, loc, originalLoops,
+                                             optimizedLoops, operands[0]);
     auto iterateOp = rewriter.create<KrnlIterateOp>(loc, pack);
     Block &iterationBlock = iterateOp.bodyRegion().front();
 
