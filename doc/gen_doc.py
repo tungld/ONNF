@@ -38,6 +38,7 @@ special_op_handler = dict([
         ("MaxPool", "ImportNodeMaxPool"),
         ("BatchNormalization", "ImportNodeBatchNormalization"),
         ("Gemm", "ImportNodeGemm"),
+        ("Pad", "ImportNodePad"),
         #("Transpose", "ImportNodeTranspose")
         ])
 
