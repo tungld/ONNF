@@ -1465,7 +1465,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         // (s1 x s2 x... x sK x M x K) MATMUL (K x N)
         // =>
         // (s1 x s2 x... x sK x M x N)
-        for (int64_t i = 0; i < memRefShape.size() - 2; ++i) {
+        for (int i = 0; i < memRefShape.size() - 2; ++i) {
           if (memRefShape[i] < 0) {
             if ((AShape.size() == 2) && (BShape.size() > 2))
               allocOperands.emplace_back(rewriter.create<DimOp>(loc, B, i));
