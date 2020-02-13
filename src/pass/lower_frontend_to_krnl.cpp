@@ -249,20 +249,20 @@ unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
 
 // Get run-time dimension information for unknown dimensions used for
 // broadcasting.
-std::map<int64_t, std::map<int64_t, Value>>
+std::map<int, std::map<int, Value>>
 getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
                       MemRefType memRefType, ArrayRef<Value> operands) {
   auto memRefShape = memRefType.getShape();
-  int64_t rank = memRefShape.size();
+  int rank = memRefShape.size();
   // For unknown dimensions, we need to get dimension values at runtime in
   // order to do broadcasting.
-  std::map<int64_t, std::map<int64_t, Value>> DimInfo;
+  std::map<int, std::map<int, Value>> DimInfo;
   // For each result dimension, compute the number of sharing operands.
   // Sharing operands are operands sharing the same index (counting from the
   // rightmost to the leftmost) for a given dimension.
-  std::map<int64_t, int64_t> sharedDimCount;
-  for (int64_t reversedIdx = 0; reversedIdx < rank; ++reversedIdx) {
-    int64_t dimIdx = rank - 1 - reversedIdx;
+  std::map<int, int> sharedDimCount;
+  for (int reversedIdx = 0; reversedIdx < rank; ++reversedIdx) {
+    int dimIdx = rank - 1 - reversedIdx;
     sharedDimCount[dimIdx] = 0;
     for (int i = 0; i < operands.size(); ++i) {
       auto shape = operands[i].getType().cast<MemRefType>().getShape();
@@ -275,11 +275,11 @@ getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
   // Otherwise, non-broadcasted dimension.
   // We only care about unknown dimensions whose number of sharing operands is
   // more than one, since they are potentially broadcasted dimensions.
-  for (int64_t i = 0; i < operands.size(); ++i) {
-    std::map<int64_t, Value> broadcastedDims;
+  for (int i = 0; i < operands.size(); ++i) {
+    std::map<int, Value> broadcastedDims;
     auto shape = operands[i].getType().cast<MemRefType>().getShape();
-    int64_t size = shape.size();
-    for (int64_t j = 0; j < shape.size(); ++j) {
+    int size = shape.size();
+    for (int j = 0; j < shape.size(); ++j) {
       if (shape[j] < 0 and sharedDimCount[rank - size + j] > 1) {
         auto dim = rewriter.create<DimOp>(loc, operands[i], j).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
@@ -298,7 +298,7 @@ getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
 std::vector<Value>
 getLoopIVsForBroadcasting(Location loc, ConversionPatternRewriter &rewriter,
                           ArrayRef<Value> loopIVs, Value operand,
-                          std::map<int64_t, Value> broadcastedDims) {
+                          std::map<int, Value> broadcastedDims) {
   // `operand` must has a ranked type. This should have been checked by the
   // shape inference pass.
   auto operandShape = operand.getType().cast<MemRefType>().getShape();
@@ -1041,7 +1041,7 @@ struct ONNXElementwiseVariadicOpLowering : public ConversionPattern {
 
     // Get run-time dimension information for unknown dimensions used for
     // broadcasting.
-    std::map<int64_t, std::map<int64_t, Value>> broadcastedDimInfo =
+    std::map<int, std::map<int, Value>> broadcastedDimInfo =
         getBroadcastedDimInfo(loc, rewriter, memRefType, operands);
 
     std::vector<Value> originalLoops;
@@ -1486,7 +1486,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         // K MATMUL (s1 x s2 x... x sK x K x N)
         // =>
         // (s1 x s2 x... x sK x N)
-        for (int64_t i = 0; i < memRefShape.size() - 1; ++i) {
+        for (int i = 0; i < memRefShape.size() - 1; ++i) {
           if (memRefShape[i] < 0) {
             auto dim = rewriter.create<DimOp>(loc, B, i);
             allocOperands.emplace_back(dim);
@@ -1501,7 +1501,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         // (s1 x s2 x... x sK x M x K) MATMUL K
         // =>
         // (s1 x s2 x... x sK x M)
-        for (int64_t i = 0; i < memRefShape.size() - 1; ++i) {
+        for (int i = 0; i < memRefShape.size() - 1; ++i) {
           if (memRefShape[i] < 0) {
             auto dim = rewriter.create<DimOp>(loc, A, i);
             allocOperands.emplace_back(dim);
@@ -1539,10 +1539,10 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
       SmallVector<Value, 4> loopBatchIVs;
       bool hasBatchLoop = false;
       if (AShape.size() > 2 || BShape.size() > 2) {
-        SmallVector<int64_t, 4> batchAxes;
+        SmallVector<int, 4> batchAxes;
         int matmulResultDims =
             ((AShape.size() == 1 || BShape.size() == 1)) ? 1 : 2;
-        for (int64_t i = 0; i < memRefShape.size() - matmulResultDims; ++i)
+        for (int i = 0; i < memRefShape.size() - matmulResultDims; ++i)
           batchAxes.emplace_back(i);
 
         std::vector<Value> outerLoops, optimizedOuterLoops;
@@ -1554,7 +1554,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         }
         KrnlIterateOperandPack outerPack(rewriter, outerLoops,
                                          optimizedOuterLoops);
-        for (int64_t i = 0; i < batchAxes.size(); ++i) {
+        for (int i = 0; i < batchAxes.size(); ++i) {
           addDimensionToPack(rewriter, loc, outerPack, alloc, i);
         }
         auto outerIterateOp = rewriter.create<KrnlIterateOp>(loc, outerPack);
@@ -1591,7 +1591,7 @@ struct ONNXMatMulOpLowering : public ConversionPattern {
         }
         KrnlIterateOperandPack matmulPack(rewriter, matmulLoops,
                                           optimizedMatmulLoops);
-        for (int64_t i = 2; i > 0; --i) {
+        for (int i = 2; i > 0; --i) {
           addDimensionToPack(rewriter, loc, matmulPack, alloc,
                              memRefShape.size() - i);
         }
