@@ -1,4 +1,4 @@
-//====- lower_frontend_to_krnl.cpp - Frontend dialects to Krnl lowering ---===//
+//====- ConvertONNXToKrnl.cpp - Frontend dialects to Krnl lowering --------===//
 //
 // Copyright 2019 The IBM Research Authors.
 //
@@ -382,17 +382,17 @@ Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
 // category.
 
 // Math
-#include "src/pass/lower_frontend_to_krnl/math/elementwise.inc"
-#include "src/pass/lower_frontend_to_krnl/math/gemm.inc"
-#include "src/pass/lower_frontend_to_krnl/math/reduction.inc"
-#include "src/pass/lower_frontend_to_krnl/math/softmax.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/elementwise.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/gemm.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/reduction.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/softmax.inc"
 // Tensor
-#include "src/pass/lower_frontend_to_krnl/tensor/reshape.inc"
-#include "src/pass/lower_frontend_to_krnl/tensor/unsqueeze.inc"
-#include "src/pass/lower_frontend_to_krnl/tensor/transpose.inc"
-#include "src/pass/lower_frontend_to_krnl/tensor/identity.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/reshape.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/unsqueeze.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/transpose.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/identity.inc"
 // Neural network
-#include "src/pass/lower_frontend_to_krnl/nn/conv.inc"
+#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/nn/conv.inc"
 
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
