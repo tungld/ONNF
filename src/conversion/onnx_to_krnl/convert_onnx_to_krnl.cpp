@@ -1,4 +1,4 @@
-//====- ConvertONNXToKrnl.cpp - Frontend dialects to Krnl lowering --------===//
+//====- convert_onnx_to_krnl.cpp - ONNX dialects to Krnl lowering -----===//
 //
 // Copyright 2019 The IBM Research Authors.
 //
@@ -164,7 +164,8 @@ getReductionMapping(MemRefType inputTy, ArrayRef<int64_t> axes, bool keepdims) {
 // Add bounds associated with the op operand to the KRNL iteration pack.
 // Dynamic dimenions are supported.
 static void addDimensionToPack(ConversionPatternRewriter &rewriter,
-    Location loc, KrnlIterateOperandPack &pack, Value operand, int index) {
+                               Location loc, KrnlIterateOperandPack &pack,
+                               Value operand, int index) {
   auto shape = operand.getType().cast<MemRefType>().getShape();
   if (shape[index] < 0) {
     pack.pushConstantBound(0);
@@ -178,10 +179,10 @@ static void addDimensionToPack(ConversionPatternRewriter &rewriter,
 
 // Function that defines the KRNL dialect loops and their respective
 // optimized version.
-static KrnlOptimizeLoopsOp emitOptimizedLoops(
-    ConversionPatternRewriter &rewriter, Location loc,
-    std::vector<Value> &loops, std::vector<Value> &optimizedLoops,
-    int64_t numLoops) {
+static KrnlOptimizeLoopsOp
+emitOptimizedLoops(ConversionPatternRewriter &rewriter, Location loc,
+                   std::vector<Value> &loops,
+                   std::vector<Value> &optimizedLoops, int64_t numLoops) {
   // Define loops.
   auto loopsOp = rewriter.create<KrnlDefineLoopsOp>(loc, numLoops);
   loops.reserve(numLoops);
@@ -199,11 +200,12 @@ static KrnlOptimizeLoopsOp emitOptimizedLoops(
 
 // Function that emits the loops and their optimized version.
 // The function returns a reference to the inner optimization block.
-static Block* defineLoops(ConversionPatternRewriter &rewriter,
-    Location loc, std::vector<Value> &loops,
-    std::vector<Value> &optimizedLoops, int64_t numLoops) {
-  KrnlOptimizeLoopsOp optimizedLoopsOp = emitOptimizedLoops(
-      rewriter, loc, loops, optimizedLoops, numLoops);
+static Block *defineLoops(ConversionPatternRewriter &rewriter, Location loc,
+                          std::vector<Value> &loops,
+                          std::vector<Value> &optimizedLoops,
+                          int64_t numLoops) {
+  KrnlOptimizeLoopsOp optimizedLoopsOp =
+      emitOptimizedLoops(rewriter, loc, loops, optimizedLoops, numLoops);
   return &optimizedLoopsOp.region().front();
 }
 
@@ -211,9 +213,9 @@ static Block* defineLoops(ConversionPatternRewriter &rewriter,
 // for a given operation argument. A reference to the loop optimization
 // block is returned in the last argument of the function.
 static void emitKrnlLoopsAndIterationForOperand(
-    ConversionPatternRewriter &rewriter, Location loc,
-    Value operand, std::vector<Value> &originalLoops,
-    KrnlOptimizeLoopsOp &optimizedLoopsOp, KrnlIterateOp &iterateOp) {
+    ConversionPatternRewriter &rewriter, Location loc, Value operand,
+    std::vector<Value> &originalLoops, KrnlOptimizeLoopsOp &optimizedLoopsOp,
+    KrnlIterateOp &iterateOp) {
   // Operand shape.
   auto shape = operand.getType().cast<MemRefType>().getShape();
 
@@ -222,8 +224,8 @@ static void emitKrnlLoopsAndIterationForOperand(
 
   // Define loops and optimized loops.
   std::vector<Value> optimizedLoops;
-  optimizedLoopsOp = emitOptimizedLoops(rewriter, loc, originalLoops,
-      optimizedLoops, rank);
+  optimizedLoopsOp =
+      emitOptimizedLoops(rewriter, loc, originalLoops, optimizedLoops, rank);
 
   KrnlIterateOperandPack pack(rewriter, originalLoops, optimizedLoops);
   // Iterate over the loop nest.
@@ -284,7 +286,7 @@ getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
         auto dim = rewriter.create<DimOp>(loc, operands[i], j).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
         auto isBroadcasted =
-          rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
+            rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
         broadcastedDims.insert(std::make_pair(j, isBroadcasted));
       }
     }
@@ -382,17 +384,17 @@ Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
 // category.
 
 // Math
-#include "src/conversion/ONNXToKrnl/RewritePatterns/math/elementwise.inc"
-#include "src/conversion/ONNXToKrnl/RewritePatterns/math/gemm.inc"
-#include "src/conversion/ONNXToKrnl/RewritePatterns/math/reduction.inc"
-#include "src/conversion/ONNXToKrnl/RewritePatterns/math/softmax.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/math/elementwise.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/math/gemm.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/math/reduction.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/math/softmax.inc"
 // Tensor
-#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/reshape.inc"
-#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/unsqueeze.inc"
-#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/transpose.inc"
-#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/identity.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/tensor/identity.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/tensor/reshape.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/tensor/transpose.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/tensor/unsqueeze.inc"
 // Neural network
-#include "src/conversion/ONNXToKrnl/RewritePatterns/nn/conv.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/nn/conv.inc"
 
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
