@@ -382,17 +382,17 @@ Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
 // category.
 
 // Math
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/elementwise.inc"
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/gemm.inc"
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/reduction.inc"
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/math/softmax.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/math/elementwise.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/math/gemm.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/math/reduction.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/math/softmax.inc"
 // Tensor
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/reshape.inc"
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/unsqueeze.inc"
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/transpose.inc"
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/tensor/identity.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/reshape.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/unsqueeze.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/transpose.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/tensor/identity.inc"
 // Neural network
-#include "src/lib/conversion/ONNXToKrnl/RewritePatterns/nn/conv.inc"
+#include "src/conversion/ONNXToKrnl/RewritePatterns/nn/conv.inc"
 
 //===----------------------------------------------------------------------===//
 // EntryPoint Op lowering to Krnl Entry Point.
