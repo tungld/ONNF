@@ -1841,8 +1841,8 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // If it failed then use a dynamic value.
     auto ATy = A.getType().cast<MemRefType>();
     auto BTy = B.getType().cast<MemRefType>();
-    int64_t K_A_Idx = (isTransA) ? 0 : 1;
-    int64_t K_B_Idx = (isTransB) ? 1 : 0;
+    int K_A_Idx = (isTransA) ? 0 : 1;
+    int K_B_Idx = (isTransB) ? 1 : 0;
     reductionPack.pushConstantBound(0);
     if (ATy.getShape()[K_A_Idx] != -1)
       reductionPack.pushConstantBound(ATy.getShape()[K_A_Idx]);
@@ -1856,9 +1856,9 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     // broadcasting.
     // GemmOp supports unidirectional broadcasting from C to A*B.
     // Hence, it must be enough to get broadcasting information for C only.
-    std::map<int64_t, Value> broadcastedDimInfo;
+    std::map<int, Value> broadcastedDimInfo;
     auto shape = C.getType().cast<MemRefType>().getShape();
-    for (int64_t i = 0; i < shape.size(); ++i) {
+    for (int i = 0; i < shape.size(); ++i) {
       if (shape[i] < 0) {
         auto dim = rewriter.create<DimOp>(loc, C, i).getResult();
         auto one = rewriter.create<ConstantIndexOp>(loc, 1);
