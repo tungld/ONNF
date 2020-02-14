@@ -289,7 +289,8 @@ LogicalResult ONNXMulOp::inferReturnTypes(
     MLIRContext *, Optional<Location> location, ValueRange operands,
     ArrayRef<NamedAttribute> attributes, RegionRange regions,
     SmallVectorImpl<Type> &inferedReturnTypes) {
-  inferedReturnTypes.assign({operands[0].getType()});
+  inferedReturnTypes.assign(
+      {getBroadcastedType(operands[0].getType(), operands[1].getType())});
   return success();
 }
 
