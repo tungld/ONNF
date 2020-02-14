@@ -17,6 +17,7 @@
 #include "mlir/IR/StandardTypes.h"
 
 #include "src/pass/shape_inference_interface.hpp"
+#include "mlir/Analysis/InferTypeOpInterface.h"
 
 namespace mlir {
 

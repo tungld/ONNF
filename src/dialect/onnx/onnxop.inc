@@ -5,7 +5,7 @@
 //********************************************************
 
 def ONNXAbsOp:ONNX_Op<"Abs", 
-    [NoSideEffect]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "ONNX Abs operation";
   let description = [{
     "Absolute takes one input data (Tensor<T>) and produces one output data"
@@ -642,7 +642,7 @@ def ONNXErfOp:ONNX_Op<"Erf",
 }
 
 def ONNXExpOp:ONNX_Op<"Exp", 
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "ONNX Exp operation";
   let description = [{
     "Calculates the exponential of the given input tensor, element-wise."
@@ -1753,7 +1753,7 @@ def ONNXModOp:ONNX_Op<"Mod",
 }
 
 def ONNXMulOp:ONNX_Op<"Mul", 
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "ONNX Mul operation";
   let description = [{
     "Performs element-wise binary multiplication (with Numpy-style broadcasting support)."

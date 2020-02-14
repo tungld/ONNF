@@ -116,6 +116,17 @@ ONNXEntryPointOp ONNXEntryPointOp::create(mlir::Location location,
 /// shape inference interface.
 void ONNXExpOp::inferShapes() { getResult().setType(getOperand().getType()); }
 
+/// Infer the result type of the ONNXExpOp. This method is required by the inter
+/// type op interace.
+LogicalResult ONNXExpOp::inferReturnTypes(
+    MLIRContext *, Optional<Location> location, ValueRange operands,
+    ArrayRef<NamedAttribute> attributes, RegionRange regions,
+    SmallVectorImpl<Type> &inferedReturnTypes) {
+  inferedReturnTypes.assign({operands[0].getType()});
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 //===----------------------------------------------------------------------===//
 // Tanh
 /// Infer the output shape of the ONNXTanhOp. This method is required by the
@@ -270,6 +281,16 @@ void ONNXMulOp::inferShapes() {
   auto lhsTy = getOperand(0).getType().cast<RankedTensorType>();
   auto rhsTy = getOperand(1).getType().cast<RankedTensorType>();
   getResult().setType(getBroadcastedType(lhsTy, rhsTy));
+}
+
+/// Infer the result type of the ONNXMulOp. This method is required by the inter
+/// type op interace.
+LogicalResult ONNXMulOp::inferReturnTypes(
+    MLIRContext *, Optional<Location> location, ValueRange operands,
+    ArrayRef<NamedAttribute> attributes, RegionRange regions,
+    SmallVectorImpl<Type> &inferedReturnTypes) {
+  inferedReturnTypes.assign({operands[0].getType()});
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1054,7 +1075,17 @@ void ONNXUnsqueezeOp::inferShapes() {
   getResult().setType(RankedTensorType::get(dims, operandTy.getElementType()));
 }
 
-//===----------------------------------------------------------------------===//
+// ONNXAbsOp
+/// Infer the result type of the ONNXAbsOp. This method is required by the inter
+/// type op interace.
+LogicalResult ONNXAbsOp::inferReturnTypes(
+    MLIRContext *, Optional<Location> location, ValueRange operands,
+    ArrayRef<NamedAttribute> attributes, RegionRange regions,
+    SmallVectorImpl<Type> &inferedReturnTypes) {
+  inferedReturnTypes.assign({operands[0].getType()});
+  return success();
+}
+
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//
 

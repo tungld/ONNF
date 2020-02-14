@@ -22,6 +22,9 @@ include "mlir/IR/OpBase.td"
 include "pass/shape_inference_interface.td"
 #endif // SHAPE_INFERENCE_INTERFACE
 
+// TODO: include only when necessary.
+include "mlir/Analysis/InferTypeOpInterface.td"
+
 def ONNX_Dialect : Dialect {
   let name = "onnx";
   let cppNamespace = "";

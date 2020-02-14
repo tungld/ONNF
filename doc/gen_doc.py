@@ -50,6 +50,9 @@ ShapeInferenceList=['Exp', 'Tanh', 'Sinh', 'Cosh', 'Sigmoid', 'Relu',
                    'ReduceMax', 'ReduceMin', 'ReduceProd', 'ReduceSum',
                    'Softplus', 'Softsign', 'Sqrt', 'Unsqueeze', 'Sign']
 
+#add an Op in this list if InferTypeOpInterface is difined for this Op
+InferTypeOpInterfaceList=['Abs', 'Exp', 'Mul']
+
 CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
                'ReduceLogSumExp', 'ReduceSumSquare']
 
@@ -317,6 +320,8 @@ def gen_schema(schema) :
     s += line_indent+'  [NoSideEffect'
     if schema.name in ShapeInferenceList :
         s+= ', DeclareOpInterfaceMethods<ShapeInferenceOpInterface>'
+    if schema.name in InferTypeOpInterfaceList:
+        s+= ', DeclareOpInterfaceMethods<InferTypeOpInterface>'
     s += ']> {'
 
     if schema.name in CanonicalList:
