@@ -56,6 +56,10 @@ InferTypeOpInterfaceList=['Abs', 'Exp', 'Mul']
 CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
                'ReduceLogSumExp', 'ReduceSumSquare']
 
+#add an Op in this list if the Op needs result type deduction which is required
+#when writing declarative rewriting rules.
+custom_builder_ops_list = ['Exp']
+
 manual_code_in_op_def = dict([
       ('DummyExample', '  let extraClassDeclaration = [{ \n'+
                     '    static StringRef getPermAttrName() { return "perm"; }\n'+
@@ -349,38 +353,21 @@ def gen_schema(schema) :
     #input
     s+= '\n'+line_indent+'let arguments = (ins '
     isfirst = True
-    if schema.inputs:
-        isfirst = False
-        for input in schema.inputs:
-            if input != schema.inputs[0] :
-                s+= ',\n           '
-            etypes=collect_types(schema, input)
+    # add operands
+    for operand_type_name in get_operand_ins(schema):
+        if not isfirst:
+            s+= ',\n           '
+        else:
+            isfirst = False
+        s+=operand_type_name[0]+':$'+operand_type_name[1]
 
-            if OpSchema.FormalParameterOption.Optional == input.option:
-                #TODO: handle optional
-                print("warning: optional input for"+schema.name+' '+input.name)
-            elif OpSchema.FormalParameterOption.Variadic == input.option:
-                if input.isHomogeneous:
-                    s+= 'Variadic<'
-                else:
-                    #TODO handle  (variadic, heterogeneous)"
-                    print("warning: (variadic, heterogeneous) for"+schema.name+' '+input.name)
-            if etypes == '':
-                s+= 'AnyTypeOf<[AnyMemRef, AnyTensor]>'
-            else:
-                s+= 'TensorOf<['+etypes+']>'
-
-            if OpSchema.FormalParameterOption.Optional == input.option:
-                #TODO: handle optional
-                t=''
-            elif OpSchema.FormalParameterOption.Variadic == input.option:
-                if input.isHomogeneous:
-                    s+= '>'
-                else:
-                    #TODO handle  (variadic, heterogeneous)"
-                    t=''
-            s+=':$'+input.name
-    s += gen_attr_ins(schema, isfirst)
+    # add attributes
+    for attr_type_name in get_attr_ins(schema):
+        if not isfirst:
+            s += ',\n           '
+        else :
+            isfirst = False
+        s += attr_type_name[0]+':$'+attr_type_name[1]
     s+= ');'
 
     #output
@@ -399,6 +386,13 @@ def gen_schema(schema) :
     s+= ');\n'
 
     #s+= 'let hasCanonicalizer = 1;'
+
+    #add custom builders
+    if schema.name in custom_builder_ops_list:
+        s += line_indent+'let builders = ['
+        # custom build method with operands only.
+        s += '];\n'
+
     #add special code
     if schema.name in manual_code_in_op_def :
         s += manual_code_in_op_def[schema.name]
@@ -451,7 +445,45 @@ def gen_code(schema,fefile) :
     else:
         fefile.write(', '+variadicIn+', '+variadicOut+');\n')
 
-def gen_attr_ins(schema, isfirst) :
+def get_operand_ins(schema):
+    operand_type_and_name_list = []  # [(optype, opname)]
+    if schema.inputs:
+        #isfirst = False
+        for input in schema.inputs:
+            #if input != schema.inputs[0] :
+            #    s+= ',\n           '
+            optype = ""
+
+            etypes=collect_types(schema, input)
+
+            if OpSchema.FormalParameterOption.Optional == input.option:
+#TODO : handle optional
+                print("warning: optional input for"+schema.name+' '+input.name)
+            elif OpSchema.FormalParameterOption.Variadic == input.option:
+                if input.isHomogeneous:
+                    optype += 'Variadic<'
+                else:
+#TODO handle(variadic, heterogeneous) "
+                    print("warning: (variadic, heterogeneous) for"+schema.name+' '+input.name)
+            if etypes == '':
+                optype += 'AnyTypeOf<[AnyMemRef, AnyTensor]>'
+            else:
+                optype += 'TensorOf<['+etypes+']>'
+
+            if OpSchema.FormalParameterOption.Optional == input.option:
+#TODO : handle optional
+                t=''
+            elif OpSchema.FormalParameterOption.Variadic == input.option:
+                if input.isHomogeneous:
+                    optype += '>'
+                else:
+#TODO handle(variadic, heterogeneous) "
+                    t=''
+            #s+=':$'+input.name
+            operand_type_and_name_list.append((optype, input.name))
+    return operand_type_and_name_list
+
+def get_attr_ins(schema) :
     
     def get_attr_type_basic(attr_type) :
         if attr_type == 'int' :
@@ -483,24 +515,22 @@ def gen_attr_ins(schema, isfirst) :
         mytype += ', "'+attr_default+'">'
         return mytype
 
+    attr_type_and_name_list = []  # :: [(attrtype, attrname)]
     attr_line = ''
     if schema.attributes:
         for _, attr in sorted(schema.attributes.items()):
             #attr_line = line_indent+line_indent+line_indent+line_indent
-            if not isfirst:
-                attr_line += ',\n           '
-            else :
-                isfirst = False
-            
+            found = False
+            attr_type = ""
             if schema.name+' '+attr.name in special_attr_defaults:
                 (attr_type_str, attr_default_str) = special_attr_defaults[schema.name+' '+attr.name]
-                attr_line += get_attr_type_with_default(attr_type_str, attr_default_str)
-                attr_line += ':$'+attr.name
+                attr_type = get_attr_type_with_default(attr_type_str, attr_default_str)
+                found = True
             elif attr.required:
                 s = Text(attr.type)
                 attr_type_str  = s[s.rfind('.') + 1:].lower()
-                attr_line += get_attr_type_basic(attr_type_str)
-                attr_line += ':$'+attr.name
+                attr_type = get_attr_type_basic(attr_type_str)
+                found = True
 
             # option holds either required or default value
             elif attr.default_value.name:
@@ -531,14 +561,15 @@ def gen_attr_ins(schema, isfirst) :
                 else:
                     default_value = format_value(default_value)
                     attr_option_str = default_value
-                attr_line += get_attr_type_with_default(attr_type_str, attr_option_str)
-                attr_line += ':$'+attr.name
+                attr_type = get_attr_type_with_default(attr_type_str, attr_option_str)
+                found = True
             else:
                 s = Text(attr.type)
                 attr_type_str  = s[s.rfind('.') + 1:].lower()
-                attr_line += get_attr_type_optional(attr_type_str)
-                attr_line += ':$'+attr.name
-    return attr_line
+                attr_type = get_attr_type_optional(attr_type_str)
+            if found:
+                attr_type_and_name_list.append((attr_type, attr.name))
+    return attr_type_and_name_list
 
 def main(args):  # type: (Type[Args]) -> None
     with io.open(args.changelog, 'w', newline='') as fout:
