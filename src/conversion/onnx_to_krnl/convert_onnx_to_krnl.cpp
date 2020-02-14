@@ -388,6 +388,7 @@ Value mapToLowerScalarOp(Operation *op, ArrayRef<Type> result_types,
 #include "src/conversion/onnx_to_krnl/rewrite_patterns/math/gemm.inc"
 #include "src/conversion/onnx_to_krnl/rewrite_patterns/math/reduction.inc"
 #include "src/conversion/onnx_to_krnl/rewrite_patterns/math/softmax.inc"
+#include "src/conversion/onnx_to_krnl/rewrite_patterns/math/matmul.inc"
 // Tensor
 #include "src/conversion/onnx_to_krnl/rewrite_patterns/tensor/identity.inc"
 #include "src/conversion/onnx_to_krnl/rewrite_patterns/tensor/reshape.inc"
@@ -502,6 +503,7 @@ void FrontendToKrnlLoweringPass::runOnModule() {
   populateLoweringONNXGemmOpPattern(patterns, &getContext());
   populateLoweringONNXReductionOpPattern(patterns, &getContext());
   populateLoweringONNXSoftmaxOpPattern(patterns, &getContext());
+  populateLoweringONNXMatMulOpPattern(patterns, &getContext());
   // Tensor
   populateLoweringONNXReshapeOpPattern(patterns, &getContext());
   populateLoweringONNXUnsqueezeOpPattern(patterns, &getContext());
