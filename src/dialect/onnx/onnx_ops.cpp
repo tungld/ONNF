@@ -122,7 +122,8 @@ LogicalResult ONNXExpOp::inferReturnTypes(
     MLIRContext *, Optional<Location> location, ValueRange operands,
     ArrayRef<NamedAttribute> attributes, RegionRange regions,
     SmallVectorImpl<Type> &inferedReturnTypes) {
-  inferedReturnTypes.assign({operands[0].getType()});
+  auto elementType = operands[0].getType().cast<TensorType>().getElementType();
+  inferedReturnTypes.assign({UnrankedTensorType::get(elementType)});
   return success();
 }
 
@@ -289,8 +290,8 @@ LogicalResult ONNXMulOp::inferReturnTypes(
     MLIRContext *, Optional<Location> location, ValueRange operands,
     ArrayRef<NamedAttribute> attributes, RegionRange regions,
     SmallVectorImpl<Type> &inferedReturnTypes) {
-  inferedReturnTypes.assign(
-      {getBroadcastedType(operands[0].getType(), operands[1].getType())});
+  auto elementType = operands[0].getType().cast<TensorType>().getElementType();
+  inferedReturnTypes.assign({UnrankedTensorType::get(elementType)});
   return success();
 }
 
@@ -1083,7 +1084,8 @@ LogicalResult ONNXAbsOp::inferReturnTypes(
     MLIRContext *, Optional<Location> location, ValueRange operands,
     ArrayRef<NamedAttribute> attributes, RegionRange regions,
     SmallVectorImpl<Type> &inferedReturnTypes) {
-  inferedReturnTypes.assign({operands[0].getType()});
+  auto elementType = operands[0].getType().cast<TensorType>().getElementType();
+  inferedReturnTypes.assign({UnrankedTensorType::get(elementType)});
   return success();
 }
 
