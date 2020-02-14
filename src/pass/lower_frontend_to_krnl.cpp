@@ -253,7 +253,7 @@ std::map<int, std::map<int, Value>>
 getBroadcastedDimInfo(Location loc, ConversionPatternRewriter &rewriter,
                       MemRefType memRefType, ArrayRef<Value> operands) {
   auto memRefShape = memRefType.getShape();
-  int rank = memRefShape.size();
+  int64_t rank = memRefShape.size();
   // For unknown dimensions, we need to get dimension values at runtime in
   // order to do broadcasting.
   std::map<int, std::map<int, Value>> DimInfo;
