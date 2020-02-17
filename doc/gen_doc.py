@@ -54,7 +54,12 @@ CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
                'ReduceLogSumExp', 'ReduceSumSquare']
 
 #add an Op in this list if the Op needs result type deduction which is required
-#when writing declarative rewriting rules.
+#when writing declarative rewriting rules. Deduced type is always
+#an UnrankedTensorType whose element type is the same as the first operand's
+#element type.
+#currenlty, there are only two build methods generated:
+# - one with operands only, and
+# - one with operands and attributes having aggregated parameters.
 custom_builder_ops_list = ['Abs', 'Mul', 'Exp']
 
 manual_code_in_op_def = dict([
@@ -416,6 +421,8 @@ def gen_schema(schema) :
 
         s += line_indent*2+'}]>,\n'
 
+        #TODO: custom builders with attributes having a seperate parameter.
+
         # custom builders with all operands and attributes having aggregate parameters.
         # E.g. OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{}]>'
         s += line_indent*2
@@ -426,6 +433,7 @@ def gen_schema(schema) :
         s += line_indent*3+'build(builder, state, outputTypes, operands, attributes);\n'
 
         s += line_indent*2+'}]>'
+
         s += '\n'+line_indent+'];\n'
 
     #add special code
