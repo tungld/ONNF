@@ -5,7 +5,7 @@
 //********************************************************
 
 def ONNXAbsOp:ONNX_Op<"Abs", 
-    [NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+    [NoSideEffect]> {
   let summary = "ONNX Abs operation";
   let description = [{
     "Absolute takes one input data (Tensor<T>) and produces one output data"
@@ -14,6 +14,23 @@ def ONNXAbsOp:ONNX_Op<"Abs",
   }];
   let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$X);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$Y);
+  let builders = [
+    OpBuilder<"Builder *builder, OperationState &state,Value X", [{
+      state.addOperands(X);
+      auto elementType = X.getType().cast<TensorType>().getElementType();
+      std::vector<mlir::Type> outputTypes;
+      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
+      state.addTypes(outputTypes);
+      }]>,
+    OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{
+      state.addOperands(operands);
+      state.addAttributes(attributes);
+      auto elementType = operands[0].getType().cast<TensorType>().getElementType();
+      std::vector<mlir::Type> outputTypes;
+      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
+      state.addTypes(outputTypes);
+    }]>
+  ];
 }
 
 def ONNXAcosOp:ONNX_Op<"Acos", 
@@ -642,13 +659,30 @@ def ONNXErfOp:ONNX_Op<"Erf",
 }
 
 def ONNXExpOp:ONNX_Op<"Exp", 
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX Exp operation";
   let description = [{
     "Calculates the exponential of the given input tensor, element-wise."
   }];
   let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$input);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$output);
+  let builders = [
+    OpBuilder<"Builder *builder, OperationState &state,Value input", [{
+      state.addOperands(input);
+      auto elementType = input.getType().cast<TensorType>().getElementType();
+      std::vector<mlir::Type> outputTypes;
+      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
+      state.addTypes(outputTypes);
+      }]>,
+    OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{
+      state.addOperands(operands);
+      state.addAttributes(attributes);
+      auto elementType = operands[0].getType().cast<TensorType>().getElementType();
+      std::vector<mlir::Type> outputTypes;
+      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
+      state.addTypes(outputTypes);
+    }]>
+  ];
 }
 
 def ONNXExpandOp:ONNX_Op<"Expand", 
@@ -1753,7 +1787,7 @@ def ONNXModOp:ONNX_Op<"Mod",
 }
 
 def ONNXMulOp:ONNX_Op<"Mul", 
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "ONNX Mul operation";
   let description = [{
     "Performs element-wise binary multiplication (with Numpy-style broadcasting support)."
@@ -1763,6 +1797,24 @@ def ONNXMulOp:ONNX_Op<"Mul",
   let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$A,
            AnyTypeOf<[AnyMemRef, AnyTensor]>:$B);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$C);
+  let builders = [
+    OpBuilder<"Builder *builder, OperationState &state,Value A, Value B", [{
+      state.addOperands(A);
+      state.addOperands(B);
+      auto elementType = A.getType().cast<TensorType>().getElementType();
+      std::vector<mlir::Type> outputTypes;
+      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
+      state.addTypes(outputTypes);
+      }]>,
+    OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{
+      state.addOperands(operands);
+      state.addAttributes(attributes);
+      auto elementType = operands[0].getType().cast<TensorType>().getElementType();
+      std::vector<mlir::Type> outputTypes;
+      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
+      state.addTypes(outputTypes);
+    }]>
+  ];
 }
 
 def ONNXMultinomialOp:ONNX_Op<"Multinomial", 

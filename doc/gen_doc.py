@@ -50,15 +50,12 @@ ShapeInferenceList=['Exp', 'Tanh', 'Sinh', 'Cosh', 'Sigmoid', 'Relu',
                    'ReduceMax', 'ReduceMin', 'ReduceProd', 'ReduceSum',
                    'Softplus', 'Softsign', 'Sqrt', 'Unsqueeze', 'Sign']
 
-#add an Op in this list if InferTypeOpInterface is difined for this Op
-InferTypeOpInterfaceList=['Abs', 'Exp', 'Mul']
-
 CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
                'ReduceLogSumExp', 'ReduceSumSquare']
 
 #add an Op in this list if the Op needs result type deduction which is required
 #when writing declarative rewriting rules.
-custom_builder_ops_list = ['Exp']
+custom_builder_ops_list = ['Abs', 'Mul', 'Exp']
 
 manual_code_in_op_def = dict([
       ('DummyExample', '  let extraClassDeclaration = [{ \n'+
@@ -324,8 +321,6 @@ def gen_schema(schema) :
     s += line_indent+'  [NoSideEffect'
     if schema.name in ShapeInferenceList :
         s+= ', DeclareOpInterfaceMethods<ShapeInferenceOpInterface>'
-    if schema.name in InferTypeOpInterfaceList:
-        s+= ', DeclareOpInterfaceMethods<InferTypeOpInterface>'
     s += ']> {'
 
     if schema.name in CanonicalList:
@@ -354,7 +349,8 @@ def gen_schema(schema) :
     s+= '\n'+line_indent+'let arguments = (ins '
     isfirst = True
     # add operands
-    for operand_type_name in get_operand_ins(schema):
+    operand_ins = get_operand_ins(schema)
+    for operand_type_name in operand_ins:
         if not isfirst:
             s+= ',\n           '
         else:
@@ -362,7 +358,8 @@ def gen_schema(schema) :
         s+=operand_type_name[0]+':$'+operand_type_name[1]
 
     # add attributes
-    for attr_type_name in get_attr_ins(schema):
+    attr_ins = get_attr_ins(schema)
+    for attr_type_name in attr_ins:
         if not isfirst:
             s += ',\n           '
         else :
@@ -389,9 +386,45 @@ def gen_schema(schema) :
 
     #add custom builders
     if schema.name in custom_builder_ops_list:
-        s += line_indent+'let builders = ['
-        # custom build method with operands only.
-        s += '];\n'
+        s += line_indent+'let builders = [\n'
+        # operands only.
+        s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state,'
+        isfirst = True
+        first_operand = ""
+        for _, arg_name in operand_ins:
+            if not isfirst:
+                s += ', '
+            else:
+                isfirst = False
+                first_operand = arg_name
+            s += 'Value '+arg_name
+        s += '", [{\n'
+
+        for _, arg_name in operand_ins:
+            s += line_indent*3+'state.addOperands('+arg_name+');\n'
+        ## use element type of the first operand to construct an UnrankedTensorType for the output.
+        first_operand = operand_ins[0][1]
+        s += line_indent*3+'auto elementType = '+first_operand+'.getType().cast<TensorType>().getElementType();\n'
+        s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
+        s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
+        s += line_indent*3+'state.addTypes(outputTypes);\n'
+
+        s += line_indent*3+'}]>'
+
+        # all operands and attributes have aggregate parameters.
+        s += ', '
+        s += '\n'+line_indent*2
+        s += 'OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{\n'
+        s += line_indent*3+'state.addOperands(operands);\n'
+        s += line_indent*3+'state.addAttributes(attributes);\n'
+        ## use element type of the first operand to construct an UnrankedTensorType for the output.
+        s += line_indent*3+'auto elementType = operands[0].getType().cast<TensorType>().getElementType();\n'
+        s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
+        s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
+        s += line_indent*3+'state.addTypes(outputTypes);\n'
+
+        s += line_indent*2+'}]>'
+        s += '\n'+line_indent+'];\n'
 
     #add special code
     if schema.name in manual_code_in_op_def :
