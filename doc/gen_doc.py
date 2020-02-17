@@ -355,21 +355,21 @@ def gen_schema(schema) :
     isfirst = True
     # add operands
     operand_ins = get_operand_ins(schema)
-    for operand_type_name in operand_ins:
+    for operand_type, operand_name in operand_ins:
         if not isfirst:
             s+= ',\n           '
         else:
             isfirst = False
-        s+=operand_type_name[0]+':$'+operand_type_name[1]
+        s+=operand_type+':$'+operand_name
 
     # add attributes
     attr_ins = get_attr_ins(schema)
-    for attr_type_name in attr_ins:
+    for attr_type, attr_name in attr_ins:
         if not isfirst:
             s += ',\n           '
         else :
             isfirst = False
-        s += attr_type_name[0]+':$'+attr_type_name[1]
+        s += attr_type+':$'+attr_name
     s+= ');'
 
     #output
@@ -425,13 +425,11 @@ def gen_schema(schema) :
 
         # custom builders with all operands and attributes having aggregate parameters.
         # E.g. OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{}]>'
-        s += line_indent*2
-        s += 'OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{\n'
+        s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{\n'
         s += line_indent*3+'auto elementType = operands[0].getType().cast<TensorType>().getElementType();\n'
         s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
         s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
         s += line_indent*3+'build(builder, state, outputTypes, operands, attributes);\n'
-
         s += line_indent*2+'}]>'
 
         s += '\n'+line_indent+'];\n'
