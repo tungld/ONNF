@@ -16,19 +16,14 @@ def ONNXAbsOp:ONNX_Op<"Abs",
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$Y);
   let builders = [
     OpBuilder<"Builder *builder, OperationState &state,Value X", [{
-      state.addOperands(X);
       auto elementType = X.getType().cast<TensorType>().getElementType();
-      std::vector<mlir::Type> outputTypes;
-      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
-      state.addTypes(outputTypes);
-      }]>,
+      build(builder, state, UnrankedTensorType::get(elementType), X);
+    }]>,
     OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{
-      state.addOperands(operands);
-      state.addAttributes(attributes);
       auto elementType = operands[0].getType().cast<TensorType>().getElementType();
       std::vector<mlir::Type> outputTypes;
       outputTypes.emplace_back(UnrankedTensorType::get(elementType));
-      state.addTypes(outputTypes);
+      build(builder, state, outputTypes, operands, attributes);
     }]>
   ];
 }
@@ -668,19 +663,14 @@ def ONNXExpOp:ONNX_Op<"Exp",
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$output);
   let builders = [
     OpBuilder<"Builder *builder, OperationState &state,Value input", [{
-      state.addOperands(input);
       auto elementType = input.getType().cast<TensorType>().getElementType();
-      std::vector<mlir::Type> outputTypes;
-      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
-      state.addTypes(outputTypes);
-      }]>,
+      build(builder, state, UnrankedTensorType::get(elementType), input);
+    }]>,
     OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{
-      state.addOperands(operands);
-      state.addAttributes(attributes);
       auto elementType = operands[0].getType().cast<TensorType>().getElementType();
       std::vector<mlir::Type> outputTypes;
       outputTypes.emplace_back(UnrankedTensorType::get(elementType));
-      state.addTypes(outputTypes);
+      build(builder, state, outputTypes, operands, attributes);
     }]>
   ];
 }
@@ -1799,20 +1789,14 @@ def ONNXMulOp:ONNX_Op<"Mul",
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$C);
   let builders = [
     OpBuilder<"Builder *builder, OperationState &state,Value A, Value B", [{
-      state.addOperands(A);
-      state.addOperands(B);
       auto elementType = A.getType().cast<TensorType>().getElementType();
-      std::vector<mlir::Type> outputTypes;
-      outputTypes.emplace_back(UnrankedTensorType::get(elementType));
-      state.addTypes(outputTypes);
-      }]>,
+      build(builder, state, UnrankedTensorType::get(elementType), A, B);
+    }]>,
     OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{
-      state.addOperands(operands);
-      state.addAttributes(attributes);
       auto elementType = operands[0].getType().cast<TensorType>().getElementType();
       std::vector<mlir::Type> outputTypes;
       outputTypes.emplace_back(UnrankedTensorType::get(elementType));
-      state.addTypes(outputTypes);
+      build(builder, state, outputTypes, operands, attributes);
     }]>
   ];
 }

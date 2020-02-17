@@ -384,10 +384,12 @@ def gen_schema(schema) :
 
     #s+= 'let hasCanonicalizer = 1;'
 
-    #add custom builders
+    # add custom builders
+    # use element type of the first operand to construct an UnrankedTensorType for the output.
     if schema.name in custom_builder_ops_list:
         s += line_indent+'let builders = [\n'
-        # operands only.
+        # custom builders with operands only.
+        # E.g. OpBuilder<"Builder *builder, OperationState &state, Value X, Value, Y", [{}]>
         s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state,'
         isfirst = True
         first_operand = ""
@@ -400,28 +402,28 @@ def gen_schema(schema) :
             s += 'Value '+arg_name
         s += '", [{\n'
 
-        for _, arg_name in operand_ins:
-            s += line_indent*3+'state.addOperands('+arg_name+');\n'
-        ## use element type of the first operand to construct an UnrankedTensorType for the output.
         first_operand = operand_ins[0][1]
         s += line_indent*3+'auto elementType = '+first_operand+'.getType().cast<TensorType>().getElementType();\n'
-        s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
-        s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
-        s += line_indent*3+'state.addTypes(outputTypes);\n'
+        s += line_indent*3+'build(builder, state, UnrankedTensorType::get(elementType), '
+        isfirst = True
+        for _, arg_name in operand_ins:
+            if not isfirst:
+                s += ', '
+            else:
+                isfirst = False
+            s += arg_name
+        s += ');\n'
 
-        s += line_indent*3+'}]>'
+        s += line_indent*2+'}]>,\n'
 
-        # all operands and attributes have aggregate parameters.
-        s += ', '
-        s += '\n'+line_indent*2
+        # custom builders with all operands and attributes having aggregate parameters.
+        # E.g. OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{}]>'
+        s += line_indent*2
         s += 'OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{\n'
-        s += line_indent*3+'state.addOperands(operands);\n'
-        s += line_indent*3+'state.addAttributes(attributes);\n'
-        ## use element type of the first operand to construct an UnrankedTensorType for the output.
         s += line_indent*3+'auto elementType = operands[0].getType().cast<TensorType>().getElementType();\n'
         s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
         s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
-        s += line_indent*3+'state.addTypes(outputTypes);\n'
+        s += line_indent*3+'build(builder, state, outputTypes, operands, attributes);\n'
 
         s += line_indent*2+'}]>'
         s += '\n'+line_indent+'];\n'
@@ -481,22 +483,19 @@ def gen_code(schema,fefile) :
 def get_operand_ins(schema):
     operand_type_and_name_list = []  # [(optype, opname)]
     if schema.inputs:
-        #isfirst = False
         for input in schema.inputs:
-            #if input != schema.inputs[0] :
-            #    s+= ',\n           '
             optype = ""
 
             etypes=collect_types(schema, input)
 
             if OpSchema.FormalParameterOption.Optional == input.option:
-#TODO : handle optional
+                #TODO : handle optional
                 print("warning: optional input for"+schema.name+' '+input.name)
             elif OpSchema.FormalParameterOption.Variadic == input.option:
                 if input.isHomogeneous:
                     optype += 'Variadic<'
                 else:
-#TODO handle(variadic, heterogeneous) "
+                    #TODO handle(variadic, heterogeneous) "
                     print("warning: (variadic, heterogeneous) for"+schema.name+' '+input.name)
             if etypes == '':
                 optype += 'AnyTypeOf<[AnyMemRef, AnyTensor]>'
@@ -504,15 +503,14 @@ def get_operand_ins(schema):
                 optype += 'TensorOf<['+etypes+']>'
 
             if OpSchema.FormalParameterOption.Optional == input.option:
-#TODO : handle optional
+                #TODO : handle optional
                 t=''
             elif OpSchema.FormalParameterOption.Variadic == input.option:
                 if input.isHomogeneous:
                     optype += '>'
                 else:
-#TODO handle(variadic, heterogeneous) "
+                    #TODO handle(variadic, heterogeneous) "
                     t=''
-            #s+=':$'+input.name
             operand_type_and_name_list.append((optype, input.name))
     return operand_type_and_name_list
 
