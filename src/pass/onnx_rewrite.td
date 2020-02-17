@@ -31,6 +31,18 @@ def ReduceL1OpPattern: Pat<(ONNXReduceL1Op $oprd, $axes, $keepdims),
                            (ONNXReduceSumOp (ONNXAbsOp $oprd), $axes, $keepdims)>;
 
 //===----------------------------------------------------------------------===//
+// ONNXReduceL2Op %X = ONNXSqrtOp (ONNXReduceSumSquareOp (%X))
+//===----------------------------------------------------------------------===//
+def ReduceL2OpPattern: Pat<(ONNXReduceL2Op $oprd, $axes, $keepdims),
+                           (ONNXSqrtOp (ONNXReduceSumSquareOp $oprd, $axes, $keepdims))>;
+
+//===----------------------------------------------------------------------===//
+// ONNXReduceLogSumOp %X = ONNXLogOp (ONNXReduceSumOp (%X))
+//===----------------------------------------------------------------------===//
+def ReduceLogSumOpPattern: Pat<(ONNXReduceLogSumOp $oprd, $axes, $keepdims),
+                           (ONNXLogOp (ONNXReduceSumOp $oprd, $axes, $keepdims))>;
+
+//===----------------------------------------------------------------------===//
 // ONNXReduceLogSumExpOp %X = ONNXReduceLogSumOp (ONNXExpOp %X)
 //===----------------------------------------------------------------------===//
 def ReduceLogSumExpOpPattern: Pat<(ONNXReduceLogSumExpOp $oprd, $axes, $keepdims),

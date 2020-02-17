@@ -58,9 +58,9 @@ CanonicalList=['Add', 'Identity', 'ReduceL1', 'ReduceL2', 'ReduceLogSum',
 #an UnrankedTensorType whose element type is the same as the first operand's
 #element type.
 #currenlty, there are only two build methods generated:
-# - one with operands only, and
+# - one with operands and attributes having a separate parameter, and
 # - one with operands and attributes having aggregated parameters.
-custom_builder_ops_list = ['Abs', 'Mul', 'Exp']
+custom_builder_ops_list = ['Abs', 'Mul', 'Exp', 'ReduceSum', 'ReduceSumSquare']
 
 manual_code_in_op_def = dict([
       ('DummyExample', '  let extraClassDeclaration = [{ \n'+
@@ -389,12 +389,28 @@ def gen_schema(schema) :
 
     #s+= 'let hasCanonicalizer = 1;'
 
+    #TODO: any better way to do this.
+    def get_attr_type_basic(attr_type) :
+        if 'I64Attr' in attr_type :
+            mytype = 'IntegerAttr'
+        elif 'F32Attr' in attr_type :
+            mytype = 'FloatAttr'
+        elif 'I64ArrayAttr' in attr_type or 'F32ArrayAttr' in attr_type:
+            mytype = 'ArrayAttr'
+        elif 'StrAttr' in attr_type :
+            mytype = 'StringAttr'
+        elif 'strings' in attr_type :
+            mytype = 'ArrayAttr'
+        else :
+            mytype ='Attribute'
+        return mytype
+
     # add custom builders
     # use element type of the first operand to construct an UnrankedTensorType for the output.
     if schema.name in custom_builder_ops_list:
         s += line_indent+'let builders = [\n'
-        # custom builders with operands only.
-        # E.g. OpBuilder<"Builder *builder, OperationState &state, Value X, Value, Y", [{}]>
+        # custom builders with operands and attributes having a seperate parameter.
+        # E.g. OpBuilder<"Builder *builder, OperationState &state, Value X, Value, Y, Attribute A", [{}]>
         s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state,'
         isfirst = True
         first_operand = ""
@@ -405,6 +421,13 @@ def gen_schema(schema) :
                 isfirst = False
                 first_operand = arg_name
             s += 'Value '+arg_name
+        if len(attr_ins) > 0:
+            for attr_type, attr_name in attr_ins:
+                if not isfirst:
+                    s += ', '
+                else:
+                    isfirst = False
+                s += get_attr_type_basic(attr_type)+' '+attr_name
         s += '", [{\n'
 
         first_operand = operand_ins[0][1]
@@ -417,11 +440,16 @@ def gen_schema(schema) :
             else:
                 isfirst = False
             s += arg_name
+        if len(attr_ins) > 0:
+            for _, attr_name in attr_ins:
+                if not isfirst:
+                    s += ', '
+                else:
+                    isfirst = False
+                s += attr_name
         s += ');\n'
 
         s += line_indent*2+'}]>,\n'
-
-        #TODO: custom builders with attributes having a seperate parameter.
 
         # custom builders with all operands and attributes having aggregate parameters.
         # E.g. OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{}]>'
