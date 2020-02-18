@@ -390,7 +390,7 @@ def gen_schema(schema) :
     #s+= 'let hasCanonicalizer = 1;'
 
     #TODO: any better way to do this.
-    def get_attr_type_basic(attr_type) :
+    def get_attr_type_for_builder(attr_type) :
         if 'I64Attr' in attr_type :
             mytype = 'IntegerAttr'
         elif 'F32Attr' in attr_type :
@@ -405,6 +405,13 @@ def gen_schema(schema) :
             mytype ='Attribute'
         return mytype
 
+    def get_op_type_for_builder(op_type):
+        if op_type.startswith('Variadic'):
+            mytype = 'ValueRange'
+        else:
+            mytype = 'Value'
+        return mytype
+
     # add custom builders
     # use element type of the first operand to construct an UnrankedTensorType for the output.
     if schema.name in custom_builder_ops_list:
@@ -414,24 +421,27 @@ def gen_schema(schema) :
         s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state,'
         isfirst = True
         first_operand = ""
-        for _, arg_name in operand_ins:
+        for arg_type, arg_name in operand_ins:
             if not isfirst:
                 s += ', '
             else:
                 isfirst = False
                 first_operand = arg_name
-            s += 'Value '+arg_name
+            s += get_op_type_for_builder(arg_type)+' '+arg_name
         if len(attr_ins) > 0:
             for attr_type, attr_name in attr_ins:
                 if not isfirst:
                     s += ', '
                 else:
                     isfirst = False
-                s += get_attr_type_basic(attr_type)+' '+attr_name
+                s += get_attr_type_for_builder(attr_type)+' '+attr_name
         s += '", [{\n'
 
-        first_operand = operand_ins[0][1]
-        s += line_indent*3+'auto elementType = '+first_operand+'.getType().cast<TensorType>().getElementType();\n'
+        first_operand = operand_ins[0]
+        if get_op_type_for_builder(first_operand[0]) == 'ValueRange':
+            s += line_indent*3+'auto elementType = '+first_operand[1]+'[0].getType().cast<TensorType>().getElementType();\n'
+        else:
+            s += line_indent*3+'auto elementType = '+first_operand[1]+'.getType().cast<TensorType>().getElementType();\n'
         s += line_indent*3+'build(builder, state, UnrankedTensorType::get(elementType), '
         isfirst = True
         for _, arg_name in operand_ins:
