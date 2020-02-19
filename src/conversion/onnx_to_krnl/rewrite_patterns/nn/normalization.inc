@@ -1,10 +1,10 @@
-//===----- normalizaion.inc - Lowering Normalization Ops ------------------===//
+//===----- normalization.inc - Lowering Normalization Ops -----------------===//
 //
 // Copyright 2019 The IBM Research Authors.
 //
 // =============================================================================
 //
-// This file lowers the ONNX Normalization Operators to Krnl dialect.
+// This file lowers ONNX Normalization Operators to Krnl dialect.
 //
 //===----------------------------------------------------------------------===//
 
