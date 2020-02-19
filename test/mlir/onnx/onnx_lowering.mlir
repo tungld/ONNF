@@ -930,63 +930,221 @@ func @test_sign_i(%arg0 : tensor<?x10xi32>) -> tensor<*xi32> {
   // CHECK: return [[RES]] : memref<?x10xi32>
 }
 
-func @test_batchnorm_testmode_Nd(%arg0: tensor<1x2x1x3xf32>, %arg1: tensor<2xf32>, %arg2: tensor<2xf32>, %arg3: tensor<2xf32>, %arg4: tensor<2xf32>) -> tensor<1x2x1x3xf32> {
-  %0 = "onnx.BatchNormalizationTestMode"(%arg0, %arg1, %arg2, %arg3, %arg4) : (tensor<1x2x1x3xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>) -> tensor<1x2x1x3xf32>
-  return %0 : tensor<1x2x1x3xf32>
+// 2-D x 2-D
+func @test_matmul1(%arg0 : tensor<10x5xf32>, %arg1 : tensor<5x10xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<10x5xf32>, tensor<5x10xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
 
-  // CHECK-LABEL: test_batchnorm_testmode_Nd
-  // CHECK: [[RES:%.+]] = alloc() : memref<1x2x1x3xf32>
-  // CHECK: [[EPSILON:%.+]] = constant 9.99999974E-6 : f32
-  // CHECK: [[DEF_LOOPS:%.+]]:4 = krnl.define_loops 4
-  // CHECK: [[OPT_LOOPS:%.+]]:4 = krnl.optimize_loops  {
-  // CHECK:   krnl.return_loops [[DEF_LOOPS]]#0, [[DEF_LOOPS]]#1, [[DEF_LOOPS]]#2, [[DEF_LOOPS]]#3
-  // CHECK: } : () -> (!krnl.loop, !krnl.loop, !krnl.loop, !krnl.loop)
-  // CHECK: krnl.iterate([[OPT_LOOPS]]#1) with ([[DEF_LOOPS]]#1 -> %arg5 = 0 to 2) {
-  // CHECK:   [[SCALE:%.+]] = load %arg1[%arg5] : memref<2xf32>
-  // CHECK:   [[BIAS:%.+]] = load %arg2[%arg5] : memref<2xf32>
-  // CHECK:   [[MEAN:%.+]] = load %arg3[%arg5] : memref<2xf32>
-  // CHECK:   [[VARIANCE:%.+]] = load %arg4[%arg5] : memref<2xf32>
-  // CHECK:   krnl.iterate([[OPT_LOOPS]]#0, [[OPT_LOOPS]]#2, [[OPT_LOOPS]]#3) with ([[DEF_LOOPS]]#0 -> %arg6 = 0 to 1, [[DEF_LOOPS]]#2 -> %arg7 = 0 to 1, [[DEF_LOOPS]]#3 -> %arg8 = 0 to 3) {
-  // CHECK:     [[LOADED_VAL:%.+]] = load %arg0[%arg6, %arg5, %arg7, %arg8] : memref<1x2x1x3xf32>
-  // CHECK:     [[DIVIDEND:%.+]] = subf [[LOADED_VAL]], [[MEAN]] : f32
-  // CHECK:     [[ADJUSTED_VARIANCE:%.+]] = addf [[VARIANCE]], [[EPSILON]] : f32
-  // CHECK:     [[DIVISOR:%.+]] = "krnl.sqrt"([[ADJUSTED_VARIANCE]]) : (f32) -> f32
-  // CHECK:     [[NORM:%.+]] = divf [[DIVIDEND]], [[DIVISOR]] : f32
-  // CHECK:     [[SCALE_NORM:%.+]] = mulf [[SCALE]], [[NORM]] : f32
-  // CHECK:     [[SHIFT_SCALE_NORM:%.+]] = addf [[SCALE_NORM]], [[BIAS]] : f32
-  // CHECK:     store [[SHIFT_SCALE_NORM]], [[RES]][%arg6, %arg5, %arg7, %arg8] : memref<1x2x1x3xf32>
+  // CHECK-LABEL: test_matmul1
+  // CHECK: [[RES:%.+]] = alloc() : memref<10x10xf32>
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[LOOPS:%.+]]:2 = krnl.define_loops 2
+  // CHECK: [[OPT_LOOPS:%.+]]:2 = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[LOOPS]]#0, [[LOOPS]]#1
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop)
+  // CHECK: krnl.iterate([[OPT_LOOPS]]#0, [[OPT_LOOPS]]#1) with ([[LOOPS]]#0 -> %arg2 = 0 to 10, [[LOOPS]]#1 -> %arg3 = 0 to 10) {
+  // CHECK:   store [[CONSTANT]], [[RES]][%arg2, %arg3] : memref<10x10xf32>
+  // CHECK:   [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK:   [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:     krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK:   } : () -> !krnl.loop
+  // CHECK:   krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg4 = 0 to 5) {
+  // CHECK:     [[LOAD_0:%.+]] = load %arg0[%arg2, %arg4] : memref<10x5xf32>
+  // CHECK:     [[LOAD_1:%.+]] = load %arg1[%arg4, %arg3] : memref<5x10xf32>
+  // CHECK:     [[LOAD_RES:%.+]] = load [[RES]][%arg2, %arg3] : memref<10x10xf32>
+  // CHECK:     [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:     [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:     store [[ADD]], [[RES]][%arg2, %arg3] : memref<10x10xf32>
   // CHECK:   }
   // CHECK: }
-  // CHECK: return [[RES]] : memref<1x2x1x3xf32>
+  // CHECK: return [[RES]] : memref<10x10xf32>
 }
 
-func @test_batchnorm_testmode_1d(%arg0: tensor<10xf32>, %arg1: tensor<1xf32>, %arg2: tensor<1xf32>, %arg3: tensor<1xf32>, %arg4: tensor<1xf32>) -> tensor<10xf32> {
-  %0 = "onnx.BatchNormalizationTestMode"(%arg0, %arg1, %arg2, %arg3, %arg4) : (tensor<10xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>) -> tensor<10xf32>
-  return %0 : tensor<10xf32>
+// 2-D x N-D
+func @test_matmul2(%arg0 : tensor<10x5xf32>, %arg1 : tensor<2x3x5x10xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<10x5xf32>, tensor<2x3x5x10xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
 
-  // CHECK-LABEL: test_batchnorm_testmode_1d
+  // CHECK-LABEL: test_matmul2
+  // CHECK: [[RES:%.+]] = alloc() : memref<2x3x10x10xf32>
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[LOOPS:%.+]]:4 = krnl.define_loops 4
+  // CHECK: [[OPT_LOOPS:%.+]]:4 = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[LOOPS]]#0, [[LOOPS]]#1, [[LOOPS]]#2, [[LOOPS]]#3
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop, !krnl.loop, !krnl.loop)
+  // CHECK: krnl.iterate([[OPT_LOOPS]]#0, [[OPT_LOOPS]]#1) with ([[LOOPS]]#0 -> %arg2 = 0 to 2, [[LOOPS]]#1 -> %arg3 = 0 to 3) {
+  // CHECK:   krnl.iterate([[OPT_LOOPS]]#2, [[OPT_LOOPS]]#3) with ([[LOOPS]]#2 -> %arg4 = 0 to 10, [[LOOPS]]#3 -> %arg5 = 0 to 10) {
+  // CHECK:     store [[CONSTANT]], [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<2x3x10x10xf32>
+  // CHECK:     [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK:     [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:       krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK:     } : () -> !krnl.loop
+  // CHECK:     krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg6 = 0 to 5) {
+  // CHECK:       [[LOAD_0:%.+]] = load %arg0[%arg4, %arg6] : memref<10x5xf32>
+  // CHECK:       [[LOAD_1:%.+]] = load %arg1[%arg2, %arg3, %arg6, %arg5] : memref<2x3x5x10xf32>
+  // CHECK:       [[LOAD_RES:%.+]] = load [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<2x3x10x10xf32>
+  // CHECK:       [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:       [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:       store [[ADD]], [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<2x3x10x10xf32>
+  // CHECK:     }
+  // CHECK:   }
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<2x3x10x10xf32>
+}
+
+// N-D x N-D
+func @test_matmul3(%arg0 : tensor<2x3x10x5xf32>, %arg1 : tensor<2x3x5x10xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<2x3x10x5xf32>, tensor<2x3x5x10xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+
+  // CHECK-LABEL: test_matmul3
+  // CHECK: [[RES:%.+]] = alloc() : memref<2x3x10x10xf32>
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[LOOPS:%.+]]:4 = krnl.define_loops 4
+  // CHECK: [[OPT_LOOPS:%.+]]:4 = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[LOOPS]]#0, [[LOOPS]]#1, [[LOOPS]]#2, [[LOOPS]]#3
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop, !krnl.loop, !krnl.loop)
+  // CHECK: krnl.iterate([[OPT_LOOPS]]#0, [[OPT_LOOPS]]#1) with ([[LOOPS]]#0 -> %arg2 = 0 to 2, [[LOOPS]]#1 -> %arg3 = 0 to 3) {
+  // CHECK:   krnl.iterate([[OPT_LOOPS]]#2, [[OPT_LOOPS]]#3) with ([[LOOPS]]#2 -> %arg4 = 0 to 10, [[LOOPS]]#3 -> %arg5 = 0 to 10) {
+  // CHECK:     store [[CONSTANT]], [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<2x3x10x10xf32>
+  // CHECK:     [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK:     [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:       krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK:     } : () -> !krnl.loop
+  // CHECK:     krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg6 = 0 to 5) {
+  // CHECK:       [[LOAD_0:%.+]] = load %arg0[%arg2, %arg3, %arg4, %arg6] : memref<2x3x10x5xf32>
+  // CHECK:       [[LOAD_1:%.+]] = load %arg1[%arg2, %arg3, %arg6, %arg5] : memref<2x3x5x10xf32>
+  // CHECK:       [[LOAD_RES:%.+]] = load [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<2x3x10x10xf32>
+  // CHECK:       [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:       [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:       store [[ADD]], [[RES]][%arg2, %arg3, %arg4, %arg5] : memref<2x3x10x10xf32>
+  // CHECK:     }
+  // CHECK:   }
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<2x3x10x10xf32>
+}
+
+// 1-D x 2-D
+func @test_matmul4(%arg0 : tensor<5xf32>, %arg1 : tensor<5x10xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<5xf32>, tensor<5x10xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+
+  // CHECK-LABEL: test_matmul4
   // CHECK: [[RES:%.+]] = alloc() : memref<10xf32>
-  // CHECK: [[EPSILON:%.+]] = constant 9.99999974E-6 : f32
-  // CHECK: [[DEF_LOOPS:%.+]] = krnl.define_loops 1
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[LOOPS:%.+]] = krnl.define_loops 1
   // CHECK: [[OPT_LOOPS:%.+]] = krnl.optimize_loops  {
-  // CHECK:   krnl.return_loops [[DEF_LOOPS]]
+  // CHECK:   krnl.return_loops [[LOOPS]]
   // CHECK: } : () -> !krnl.loop
-  // CHECK: %[[ZERO_INDEX:.+]] = constant 0 : index
-  // CHECK: [[SCALE:%.+]] = load %arg1[%[[ZERO_INDEX]]] : memref<1xf32>
-  // CHECK: [[BIAS:%.+]] = load %arg2[%[[ZERO_INDEX]]] : memref<1xf32>
-  // CHECK: [[MEAN:%.+]] = load %arg3[%[[ZERO_INDEX]]] : memref<1xf32>
-  // CHECK: [[VARIANCE:%.+]] = load %arg4[%[[ZERO_INDEX]]] : memref<1xf32>
-  // CHECK: krnl.iterate([[OPT_LOOPS]]) with ([[DEF_LOOPS]] -> %arg5 = 0 to 10) {
-  // CHECK:   [[LOADED_VAL:%.+]] = load %arg0[%arg5] : memref<10xf32>
-  // CHECK:   [[DIVIDEND:%.+]] = subf [[LOADED_VAL]], [[MEAN]] : f32
-  // CHECK:   [[ADJUSTED_VARIANCE:%.+]] = addf [[VARIANCE]], [[EPSILON]] : f32
-  // CHECK:   [[DIVISOR:%.+]] = "krnl.sqrt"([[ADJUSTED_VARIANCE]]) : (f32) -> f32
-  // CHECK:   [[NORM:%.+]] = divf [[DIVIDEND]], [[DIVISOR]] : f32
-  // CHECK:   [[SCALE_NORM:%.+]] = mulf [[SCALE]], [[NORM]] : f32
-  // CHECK:   [[SHIFT_SCALE_NORM:%.+]] = addf [[SCALE_NORM]], [[BIAS]] : f32
-  // CHECK:   store [[SHIFT_SCALE_NORM]], [[RES]][%arg5] : memref<10xf32>
+  // CHECK: krnl.iterate([[OPT_LOOPS]]) with ([[LOOPS]] -> %arg2 = 0 to 10) {
+  // CHECK:   store [[CONSTANT]], [[RES]][%arg2] : memref<10xf32>
+  // CHECK:   [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK:   [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:     krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK:   } : () -> !krnl.loop
+  // CHECK:   krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg3 = 0 to 5) {
+  // CHECK:     [[LOAD_0:%.+]] = load %arg0[%arg3] : memref<5xf32>
+  // CHECK:     [[LOAD_1:%.+]] = load %arg1[%arg3, %arg2] : memref<5x10xf32>
+  // CHECK:     [[LOAD_RES:%.+]] = load [[RES]][%arg2] : memref<10xf32>
+  // CHECK:     [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:     [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:     store [[ADD]], [[RES]][%arg2] : memref<10xf32>
+  // CHECK:   }
   // CHECK: }
   // CHECK: return [[RES]] : memref<10xf32>
+}
+
+// 1-D x N-D
+func @test_matmul5(%arg0 : tensor<5xf32>, %arg1 : tensor<?x5x10xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<5xf32>, tensor<?x5x10xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+
+  // CHECK-LABEL: test_matmul5
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[DIM_0:%.+]] = dim %arg1, 0 : memref<?x5x10xf32>
+  // CHECK: [[RES:%.+]] = alloc([[DIM_0]]) : memref<?x10xf32>
+  // CHECK: [[LOOPS:%.+]]:2 = krnl.define_loops 2
+  // CHECK: [[OPT_LOOPS:%.+]]:2 = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[LOOPS]]#0, [[LOOPS]]#1
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop)
+  // CHECK: [[DIM_1:%.+]] = dim [[RES]], 0 : memref<?x10xf32>
+  // CHECK: krnl.iterate([[OPT_LOOPS]]#0) with ([[LOOPS]]#0 -> %arg2 = 0 to [[DIM_1]]) {
+  // CHECK:   krnl.iterate([[OPT_LOOPS]]#1) with ([[LOOPS]]#1 -> %arg3 = 0 to 10) {
+  // CHECK:     store [[CONSTANT]], [[RES]][%arg2, %arg3] : memref<?x10xf32>
+  // CHECK:     [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK:     [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:       krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK:     } : () -> !krnl.loop
+  // CHECK:     krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg4 = 0 to 5) {
+  // CHECK:       [[LOAD_0:%.+]] = load %arg0[%arg4] : memref<5xf32>
+  // CHECK:       [[LOAD_1:%.+]] = load %arg1[%arg2, %arg4, %arg3] : memref<?x5x10xf32>
+  // CHECK:       [[LOAD_RES:%.+]] = load [[RES]][%arg2, %arg3] : memref<?x10xf32>
+  // CHECK:       [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:       [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:       store [[ADD]], [[RES]][%arg2, %arg3] : memref<?x10xf32>
+  // CHECK:     }
+  // CHECK:   }
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<?x10xf32>
+}
+
+// N-D x 1-D
+func @test_matmul6(%arg0 : tensor<?x10x5xf32>, %arg1 : tensor<5xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<?x10x5xf32>, tensor<5xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+
+  // CHECK-LABEL: test_matmul6
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: [[DIM_0:%.+]] = dim %arg0, 0 : memref<?x10x5xf32>
+  // CHECK: [[RES:%.+]] = alloc([[DIM_0]]) : memref<?x10xf32>
+  // CHECK: [[LOOPS:%.+]]:2 = krnl.define_loops 2
+  // CHECK: [[OPT_LOOPS:%.+]]:2 = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[LOOPS]]#0, [[LOOPS]]#1
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop)
+  // CHECK: [[DIM_1:%.+]] = dim [[RES]], 0 : memref<?x10xf32>
+  // CHECK: krnl.iterate([[OPT_LOOPS]]#0) with ([[LOOPS]]#0 -> %arg2 = 0 to [[DIM_1]]) {
+  // CHECK:   krnl.iterate([[OPT_LOOPS]]#1) with ([[LOOPS]]#1 -> %arg3 = 0 to 10) {
+  // CHECK:     store [[CONSTANT]], [[RES]][%arg2, %arg3] : memref<?x10xf32>
+  // CHECK:     [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK:     [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:       krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK:     } : () -> !krnl.loop
+  // CHECK:     krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg4 = 0 to 5) {
+  // CHECK:       [[LOAD_0:%.+]] = load %arg0[%arg2, %arg3, %arg4] : memref<?x10x5xf32>
+  // CHECK:       [[LOAD_1:%.+]] = load %arg1[%arg4] : memref<5xf32>
+  // CHECK:       [[LOAD_RES:%.+]] = load [[RES]][%arg2, %arg3] : memref<?x10xf32>
+  // CHECK:       [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:       [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:       store [[ADD]], [[RES]][%arg2, %arg3] : memref<?x10xf32>
+  // CHECK:     }
+  // CHECK:   }
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<?x10xf32>
+}
+
+// 1-D x 1-D
+func @test_matmul7(%arg0 : tensor<5xf32>, %arg1 : tensor<5xf32>) -> tensor<*xf32> {
+  %0 ="onnx.MatMul"(%arg0, %arg1) : (tensor<5xf32>, tensor<5xf32>) -> tensor<*xf32>
+  "std.return"(%0) : (tensor<*xf32>) -> ()
+
+  // CHECK-LABEL: test_matmul7
+  // CHECK: [[RES:%.+]] = alloc() : memref<1xf32>
+  // CHECK: [[CONSTANT:%.+]] = constant 0.000000e+00 : f32
+  // CHECK: %[[CONSTANT_INDEX:.+]] = constant 0 : index
+  // CHECK: store [[CONSTANT]], [[RES]][%[[CONSTANT_INDEX]]] : memref<1xf32>
+  // CHECK: [[LOOPS_REDUCE:%.+]] = krnl.define_loops 1
+  // CHECK: [[OPT_LOOPS_REDUCE:%.+]] = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[LOOPS_REDUCE]]
+  // CHECK: } : () -> !krnl.loop
+  // CHECK: krnl.iterate([[OPT_LOOPS_REDUCE]]) with ([[LOOPS_REDUCE]] -> %arg2 = 0 to 5) {
+  // CHECK:   [[LOAD_0:%.+]] = load %arg0[%arg2] : memref<5xf32>
+  // CHECK:   [[LOAD_1:%.+]] = load %arg1[%arg2] : memref<5xf32>
+  // CHECK:   [[LOAD_RES:%.+]] = load [[RES]][%[[CONSTANT_INDEX]]] : memref<1xf32>
+  // CHECK:   [[MUL:%.+]] = mulf [[LOAD_0]], [[LOAD_1]] : f32
+  // CHECK:   [[ADD:%.+]] = addf [[LOAD_RES]], [[MUL]] : f32
+  // CHECK:   store [[ADD]], [[RES]][%[[CONSTANT_INDEX]]] : memref<1xf32>
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<1xf32>
 }
 
 func @test_conv_no_bias_no_pad(%arg0 : tensor<1x2x32x64xf32>, %arg1 : tensor<5x2x6x7xf32>) -> tensor<*xf32> {
@@ -1125,3 +1283,63 @@ func @test_conv_no_bias_no_pad_w_strides(%arg0 : tensor<1x9x32x64xf32>, %arg1 : 
 
   // CHECK: return [[RES]] : memref<1x5x14x29xf32>
 }
+
+func @test_batchnorm_testmode_Nd(%arg0: tensor<1x2x1x3xf32>, %arg1: tensor<2xf32>, %arg2: tensor<2xf32>, %arg3: tensor<2xf32>, %arg4: tensor<2xf32>) -> tensor<1x2x1x3xf32> {
+  %0 = "onnx.BatchNormalizationTestMode"(%arg0, %arg1, %arg2, %arg3, %arg4) : (tensor<1x2x1x3xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>, tensor<2xf32>) -> tensor<1x2x1x3xf32>
+  return %0 : tensor<1x2x1x3xf32>
+
+  // CHECK-LABEL: test_batchnorm_testmode_Nd
+  // CHECK: [[RES:%.+]] = alloc() : memref<1x2x1x3xf32>
+  // CHECK: [[EPSILON:%.+]] = constant 9.99999974E-6 : f32
+  // CHECK: [[DEF_LOOPS:%.+]]:4 = krnl.define_loops 4
+  // CHECK: [[OPT_LOOPS:%.+]]:4 = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[DEF_LOOPS]]#0, [[DEF_LOOPS]]#1, [[DEF_LOOPS]]#2, [[DEF_LOOPS]]#3
+  // CHECK: } : () -> (!krnl.loop, !krnl.loop, !krnl.loop, !krnl.loop)
+  // CHECK: krnl.iterate([[OPT_LOOPS]]#1) with ([[DEF_LOOPS]]#1 -> %arg5 = 0 to 2) {
+  // CHECK:   [[SCALE:%.+]] = load %arg1[%arg5] : memref<2xf32>
+  // CHECK:   [[BIAS:%.+]] = load %arg2[%arg5] : memref<2xf32>
+  // CHECK:   [[MEAN:%.+]] = load %arg3[%arg5] : memref<2xf32>
+  // CHECK:   [[VARIANCE:%.+]] = load %arg4[%arg5] : memref<2xf32>
+  // CHECK:   krnl.iterate([[OPT_LOOPS]]#0, [[OPT_LOOPS]]#2, [[OPT_LOOPS]]#3) with ([[DEF_LOOPS]]#0 -> %arg6 = 0 to 1, [[DEF_LOOPS]]#2 -> %arg7 = 0 to 1, [[DEF_LOOPS]]#3 -> %arg8 = 0 to 3) {
+  // CHECK:     [[LOADED_VAL:%.+]] = load %arg0[%arg6, %arg5, %arg7, %arg8] : memref<1x2x1x3xf32>
+  // CHECK:     [[DIVIDEND:%.+]] = subf [[LOADED_VAL]], [[MEAN]] : f32
+  // CHECK:     [[ADJUSTED_VARIANCE:%.+]] = addf [[VARIANCE]], [[EPSILON]] : f32
+  // CHECK:     [[DIVISOR:%.+]] = "krnl.sqrt"([[ADJUSTED_VARIANCE]]) : (f32) -> f32
+  // CHECK:     [[NORM:%.+]] = divf [[DIVIDEND]], [[DIVISOR]] : f32
+  // CHECK:     [[SCALE_NORM:%.+]] = mulf [[SCALE]], [[NORM]] : f32
+  // CHECK:     [[SHIFT_SCALE_NORM:%.+]] = addf [[SCALE_NORM]], [[BIAS]] : f32
+  // CHECK:     store [[SHIFT_SCALE_NORM]], [[RES]][%arg6, %arg5, %arg7, %arg8] : memref<1x2x1x3xf32>
+  // CHECK:   }
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<1x2x1x3xf32>
+}
+
+func @test_batchnorm_testmode_1d(%arg0: tensor<10xf32>, %arg1: tensor<1xf32>, %arg2: tensor<1xf32>, %arg3: tensor<1xf32>, %arg4: tensor<1xf32>) -> tensor<10xf32> {
+  %0 = "onnx.BatchNormalizationTestMode"(%arg0, %arg1, %arg2, %arg3, %arg4) : (tensor<10xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>) -> tensor<10xf32>
+  return %0 : tensor<10xf32>
+
+  // CHECK-LABEL: test_batchnorm_testmode_1d
+  // CHECK: [[RES:%.+]] = alloc() : memref<10xf32>
+  // CHECK: [[EPSILON:%.+]] = constant 9.99999974E-6 : f32
+  // CHECK: [[DEF_LOOPS:%.+]] = krnl.define_loops 1
+  // CHECK: [[OPT_LOOPS:%.+]] = krnl.optimize_loops  {
+  // CHECK:   krnl.return_loops [[DEF_LOOPS]]
+  // CHECK: } : () -> !krnl.loop
+  // CHECK: %[[ZERO_INDEX:.+]] = constant 0 : index
+  // CHECK: [[SCALE:%.+]] = load %arg1[%[[ZERO_INDEX]]] : memref<1xf32>
+  // CHECK: [[BIAS:%.+]] = load %arg2[%[[ZERO_INDEX]]] : memref<1xf32>
+  // CHECK: [[MEAN:%.+]] = load %arg3[%[[ZERO_INDEX]]] : memref<1xf32>
+  // CHECK: [[VARIANCE:%.+]] = load %arg4[%[[ZERO_INDEX]]] : memref<1xf32>
+  // CHECK: krnl.iterate([[OPT_LOOPS]]) with ([[DEF_LOOPS]] -> %arg5 = 0 to 10) {
+  // CHECK:   [[LOADED_VAL:%.+]] = load %arg0[%arg5] : memref<10xf32>
+  // CHECK:   [[DIVIDEND:%.+]] = subf [[LOADED_VAL]], [[MEAN]] : f32
+  // CHECK:   [[ADJUSTED_VARIANCE:%.+]] = addf [[VARIANCE]], [[EPSILON]] : f32
+  // CHECK:   [[DIVISOR:%.+]] = "krnl.sqrt"([[ADJUSTED_VARIANCE]]) : (f32) -> f32
+  // CHECK:   [[NORM:%.+]] = divf [[DIVIDEND]], [[DIVISOR]] : f32
+  // CHECK:   [[SCALE_NORM:%.+]] = mulf [[SCALE]], [[NORM]] : f32
+  // CHECK:   [[SHIFT_SCALE_NORM:%.+]] = addf [[SCALE_NORM]], [[BIAS]] : f32
+  // CHECK:   store [[SHIFT_SCALE_NORM]], [[RES]][%arg5] : memref<10xf32>
+  // CHECK: }
+  // CHECK: return [[RES]] : memref<10xf32>
+}
+
