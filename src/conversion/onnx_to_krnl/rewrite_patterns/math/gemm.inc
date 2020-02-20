@@ -16,7 +16,6 @@ struct ONNXGemmOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
     auto loc = op->getLoc();
     auto has_bias = (operands.size() == 3);
 
@@ -26,18 +25,17 @@ struct ONNXGemmOpLowering : public ConversionPattern {
     if (has_bias)
       C = operands[2];
 
-    auto alphaAttr = FloatAttr::get(tensorType.getElementType(),
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
+
+    auto alphaAttr = FloatAttr::get(memRefType.getElementType(),
         llvm::dyn_cast<GemmOp>(op).alpha().convertToFloat());
-    auto betaAttr = FloatAttr::get(tensorType.getElementType(),
+    auto betaAttr = FloatAttr::get(memRefType.getElementType(),
         llvm::dyn_cast<GemmOp>(op).beta().convertToFloat());
     auto alpha = rewriter.create<ConstantOp>(loc, alphaAttr);
     auto beta = rewriter.create<ConstantOp>(loc, betaAttr);
 
     bool isTransA = (llvm::dyn_cast<GemmOp>(op).transA() != 0);
     bool isTransB = (llvm::dyn_cast<GemmOp>(op).transB() != 0);
-
-    // Result type
-    auto memRefType = convertTensorToMemRef(tensorType);
 
     // Insert an allocation and deallocation for the result of this operation.
     Value alloc;
