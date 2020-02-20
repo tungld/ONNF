@@ -128,7 +128,7 @@ struct ONNXGemmOpLowering : public ConversionPattern {
           auto dim = rewriter.create<DimOp>(loc, C, i).getResult();
           auto one = rewriter.create<ConstantIndexOp>(loc, 1);
           auto isBroadcasted =
-          rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
+              rewriter.create<CmpIOp>(loc, CmpIPredicate::eq, dim, one);
           broadcastedDimInfo.insert(std::make_pair(i, isBroadcasted));
         }
       }
