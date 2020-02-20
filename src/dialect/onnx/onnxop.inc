@@ -15,7 +15,7 @@ def ONNXAbsOp:ONNX_Op<"Abs",
   let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$X);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$Y);
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state,Value X", [{
+    OpBuilder<"Builder *builder, OperationState &state, Value X", [{
       auto elementType = X.getType().cast<TensorType>().getElementType();
       build(builder, state, UnrankedTensorType::get(elementType), X);
     }]>,
@@ -662,7 +662,7 @@ def ONNXExpOp:ONNX_Op<"Exp",
   let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$input);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$output);
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state,Value input", [{
+    OpBuilder<"Builder *builder, OperationState &state, Value input", [{
       auto elementType = input.getType().cast<TensorType>().getElementType();
       build(builder, state, UnrankedTensorType::get(elementType), input);
     }]>,
@@ -1788,7 +1788,7 @@ def ONNXMulOp:ONNX_Op<"Mul",
            AnyTypeOf<[AnyMemRef, AnyTensor]>:$B);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$C);
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state,Value A, Value B", [{
+    OpBuilder<"Builder *builder, OperationState &state, Value A, Value B", [{
       auto elementType = A.getType().cast<TensorType>().getElementType();
       build(builder, state, UnrankedTensorType::get(elementType), A, B);
     }]>,
@@ -2468,7 +2468,7 @@ def ONNXReduceSumOp:ONNX_Op<"ReduceSum",
            DefaultValuedAttr<I64Attr, "1">:$keepdims);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$reduced);
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state,Value data, ArrayAttr axes, IntegerAttr keepdims", [{
+    OpBuilder<"Builder *builder, OperationState &state, Value data, ArrayAttr axes, IntegerAttr keepdims", [{
       auto elementType = data.getType().cast<TensorType>().getElementType();
       build(builder, state, UnrankedTensorType::get(elementType), data, axes, keepdims);
     }]>,
@@ -2498,7 +2498,7 @@ def ONNXReduceSumSquareOp:ONNX_Op<"ReduceSumSquare",
            DefaultValuedAttr<I64Attr, "1">:$keepdims);
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$reduced);
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state,Value data, ArrayAttr axes, IntegerAttr keepdims", [{
+    OpBuilder<"Builder *builder, OperationState &state, Value data, ArrayAttr axes, IntegerAttr keepdims", [{
       auto elementType = data.getType().cast<TensorType>().getElementType();
       build(builder, state, UnrankedTensorType::get(elementType), data, axes, keepdims);
     }]>,

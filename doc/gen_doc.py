@@ -415,62 +415,43 @@ def gen_schema(schema) :
     # add custom builders
     # use element type of the first operand to construct an UnrankedTensorType for the output.
     if schema.name in custom_builder_ops_list:
-        s += line_indent+'let builders = [\n'
-        # custom builders with operands and attributes having a seperate parameter.
-        # E.g. OpBuilder<"Builder *builder, OperationState &state, Value X, Value, Y, Attribute A", [{}]>
-        s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state,'
-        isfirst = True
-        first_operand = ""
-        for arg_type, arg_name in operand_ins:
-            if not isfirst:
-                s += ', '
-            else:
-                isfirst = False
-                first_operand = arg_name
-            s += get_op_type_for_builder(arg_type)+' '+arg_name
-        if len(attr_ins) > 0:
-            for attr_type, attr_name in attr_ins:
-                if not isfirst:
-                    s += ', '
-                else:
-                    isfirst = False
-                s += get_attr_type_for_builder(attr_type)+' '+attr_name
-        s += '", [{\n'
-
-        first_operand = operand_ins[0]
-        if get_op_type_for_builder(first_operand[0]) == 'ValueRange':
-            s += line_indent*3+'auto elementType = '+first_operand[1]+'[0].getType().cast<TensorType>().getElementType();\n'
+        if len(operand_ins) == 0:
+            print("warning: not generate custom build methods for " + schema.name + " since it does not have operands.")
         else:
-            s += line_indent*3+'auto elementType = '+first_operand[1]+'.getType().cast<TensorType>().getElementType();\n'
-        s += line_indent*3+'build(builder, state, UnrankedTensorType::get(elementType), '
-        isfirst = True
-        for _, arg_name in operand_ins:
-            if not isfirst:
-                s += ', '
+            if get_op_type_for_builder(operand_ins[0][0]) == 'ValueRange':
+                first_operand = operand_ins[0][1]+'[0]'
             else:
-                isfirst = False
-            s += arg_name
-        if len(attr_ins) > 0:
+                first_operand = operand_ins[0][1]
+
+            s += line_indent+'let builders = [\n'
+
+            # custom builders with operands and attributes having a seperate parameter.
+            # E.g. OpBuilder<"Builder *builder, OperationState &state, Value X, Value, Y, Attribute A", [{}]>
+            s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state'
+            for arg_type, arg_name in operand_ins:
+                s += ', '+get_op_type_for_builder(arg_type)+' '+arg_name
+            for attr_type, attr_name in attr_ins:
+                s += ', '+get_attr_type_for_builder(attr_type)+' '+attr_name
+            s += '", [{\n'
+            s += line_indent*3+'auto elementType = '+first_operand+'.getType().cast<TensorType>().getElementType();\n'
+            s += line_indent*3+'build(builder, state, UnrankedTensorType::get(elementType)'
+            for _, arg_name in operand_ins:
+                s += ', '+arg_name
             for _, attr_name in attr_ins:
-                if not isfirst:
-                    s += ', '
-                else:
-                    isfirst = False
-                s += attr_name
-        s += ');\n'
+                s += ', '+attr_name
+            s += ');\n'
+            s += line_indent*2+'}]>,\n'
 
-        s += line_indent*2+'}]>,\n'
+            # custom builders with all operands and attributes having aggregate parameters.
+            # E.g. OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{}]>'
+            s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{\n'
+            s += line_indent*3+'auto elementType = '+first_operand+'.getType().cast<TensorType>().getElementType();\n'
+            s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
+            s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
+            s += line_indent*3+'build(builder, state, outputTypes, operands, attributes);\n'
+            s += line_indent*2+'}]>'
 
-        # custom builders with all operands and attributes having aggregate parameters.
-        # E.g. OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{}]>'
-        s += line_indent*2+'OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes", [{\n'
-        s += line_indent*3+'auto elementType = operands[0].getType().cast<TensorType>().getElementType();\n'
-        s += line_indent*3+'std::vector<mlir::Type> outputTypes;\n'
-        s += line_indent*3+'outputTypes.emplace_back(UnrankedTensorType::get(elementType));\n'
-        s += line_indent*3+'build(builder, state, outputTypes, operands, attributes);\n'
-        s += line_indent*2+'}]>'
-
-        s += '\n'+line_indent+'];\n'
+            s += '\n'+line_indent+'];\n'
 
     #add special code
     if schema.name in manual_code_in_op_def :
