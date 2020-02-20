@@ -15,12 +15,12 @@ struct ONNXReshapeOpLowering : public ConversionPattern {
   PatternMatchResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
-    auto memRefType = convertToMemRefType(*op->result_type_begin());
-    auto memRefShape = memRefType.getShape();
     auto inputShape = operands[0].getType().cast<MemRefType>().getShape();
     auto loc = op->getLoc();
 
     // Insert an allocation and deallocation for the result of this operation.
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
+    auto memRefShape = memRefType.getShape();
     Value alloc;
 
     // Compute size in bytes using the input tensor.
