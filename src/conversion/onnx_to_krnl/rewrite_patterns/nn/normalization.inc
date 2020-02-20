@@ -17,12 +17,11 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
       ConversionPatternRewriter & rewriter) const final {
     // batchnorm{epsilon}(x, scale, bias, mean, variance) =
     //      scale * (x - mean) / sqrt(variance + epsilon) + bias
-
-    auto tensorType = (*op->result_type_begin()).cast<TensorType>();
     auto loc = op->getLoc();
 
+    auto memRefType = convertToMemRefType(*op->result_type_begin());
     auto epsilonAttr =
-        FloatAttr::get(tensorType.getElementType(),
+        FloatAttr::get(memRefType.getElementType(),
                        llvm::dyn_cast<ONNXBatchNormalizationTestModeOp>(op)
                            .epsilon()
                            .convertToFloat());
@@ -35,8 +34,6 @@ struct ONNXBatchNormalizationTestModeOpLowering : public ConversionPattern {
     auto variance = operands[4];
 
     // Insert an allocation and deallocation for the result of this operation.
-    auto memRefType = convertTensorToMemRef(tensorType);
-
     Value alloc;
     bool insertDealloc = checkInsertDealloc(op);
 
