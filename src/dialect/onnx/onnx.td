@@ -90,25 +90,6 @@ def ONNXEntryPointOp: ONNX_Op<"EntryPoint"> {
 // or outputs. This decision affects only ONNX operations with optional
 // arguments not ONNX operations with variadic operands.
 
-def ONNXGemmNoBiasOp: ONNX_Op<"GemmNoBias",
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
-  let summary = "ONNX general matrix multiply operation without bias.";
-  let description = [{
-
-    The "onnx.Gemm" generic matrix multiplication without bias.
-
-  }];
-
-  let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$A,
-           AnyTypeOf<[AnyMemRef, AnyTensor]>:$B,
-           DefaultValuedAttr<F32Attr, "1.0">:$alpha,
-           DefaultValuedAttr<F32Attr, "1.0">:$beta,
-           DefaultValuedAttr<I64Attr, "0">:$transA,
-           DefaultValuedAttr<I64Attr, "0">:$transB);
-
-  let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$o_Y);
-}
-
 def ONNXConvNoBiasOp:ONNX_Op<"ConvNoBias",
     [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let hasCanonicalizer = 1;
@@ -188,8 +169,22 @@ def ONNXPadConstantValueOp : ONNX_Op<"PadConstantValue",
   let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$output);
 }
 
-def ONNXPadConstantValuePadOp : ONNX_Op<"PadConstatValuePad",
-    [NoSideEffect ]> {
+def ONNXPadConstantPadOp : ONNX_Op<"PadConstantPad",
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface> ]> {
+  let summary = "ONNX Pad operation with constant padding value";
+  let description = [{ "this operation is introduced to handle situation"
+    " in which the padding value and padding are constants"
+    "They will become attributes."
+   }];
+  let arguments = (ins AnyTypeOf<[AnyMemRef, AnyTensor]>:$data,
+           AnyTypeOf<[AnyMemRef, AnyTensor]>:$constant_value,
+           I64ArrayAttr:$pads,
+           DefaultValuedAttr<StrAttr, "constant">:$mode);
+  let results = (outs AnyTypeOf<[AnyMemRef, AnyTensor]>:$output);
+}
+
+def ONNXPadConstantValuePadOp : ONNX_Op<"PadConstantValuePad",
+    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface> ]> {
   let summary = "ONNX Pad operation with constant padding value";
   let description = [{ "this operation is introduced to handle situation"
     " in which the padding value and padding are constants"
